@@ -783,18 +783,21 @@ function dbgCacheHit(kind, priority, label, count) {
   (kind === 'search' ? dbgTune.search : dbgTune.meta)[priority === IA_FOREGROUND ? 'fg' : 'bg'].cached++;
   dbgEvent(kind + ' cached', count == null ? '' : count + ' ids · ', String(label).slice(0, 48));
 }
-function dbgPool(poolSize, usable, sampled) {
+function dbgPool(poolSize, usable, sampled, channel) {
   if (!DEBUG_ON || !dbgTune) return;
   dbgTune.poolSize = poolSize;
   dbgTune.poolUsable = usable;
   dbgTune.poolSampled = sampled;
-  dbgEvent('pool', poolSize + ' found · ' + usable + ' usable · ' + sampled + ' sampled');
+  dbgTune.poolChannel = channel || '?';
+  dbgEvent('pool', (channel ? channel + ' · ' : '') + poolSize + ' found · ' + usable + ' usable · ',
+    sampled + ' sampled');
 }
 function dbgPick(ch, pick, fraction, source) {
   if (!DEBUG_ON || !dbgTune) return;
   const seconds = Math.round(fraction * (pick.duration || 0));
   dbgTune.pick = {
     source,
+    channel: (ch && ch.name) || '?',
     identifier: pick.identifier,
     title: pick.title || '',
     year: pick.year || '',
@@ -802,7 +805,8 @@ function dbgPick(ch, pick, fraction, source) {
     dropPct: Math.round(fraction * 100),
     dropS: seconds
   };
-  dbgEvent('pick ' + source, pick.identifier + ' · drop-in ' + dbgTune.pick.dropPct + '%');
+  dbgEvent('pick ' + source, (ch && ch.name ? ch.name + ' · ' : '') + pick.identifier,
+    ' · drop-in ' + dbgTune.pick.dropPct + '%');
 }
 function dbgVideoStateText() {
   return 'readyState ' + video.readyState +
@@ -893,12 +897,16 @@ function dbgTuneText(t) {
     (t.endedMs != null ? ' after ' + t.endedMs + 'ms' : '') +
     (t.resultDetail ? '\n          ' + t.resultDetail : ''));
   if (t.pick) {
+    const other = t.pick.channel && t.pick.channel !== t.channel;
     lines.push('  pick:   ' + t.pick.source + ' · ' + t.pick.identifier +
       (t.pick.title ? ' · "' + t.pick.title + '"' : '') + (t.pick.year ? ' (' + t.pick.year + ')' : ''));
-    lines.push('          drop-in ' + t.pick.dropPct + '% = ' + t.pick.dropS + 's of ' + t.pick.durationS + 's');
+    lines.push('          drop-in ' + t.pick.dropPct + '% = ' + t.pick.dropS + 's of ' + t.pick.durationS + 's' +
+      (other ? '\n          ^ prefetch for ' + t.pick.channel + ', NOT what was on screen' : ''));
   }
   if (t.poolSize != null) {
-    lines.push('  pool:   ' + t.poolSize + ' found · ' + t.poolUsable + ' usable · ' + t.poolSampled + ' sampled');
+    const other = t.poolChannel && t.poolChannel !== t.channel;
+    lines.push('  pool:   ' + (other ? '(for ' + t.poolChannel + ') ' : '') +
+      t.poolSize + ' found · ' + t.poolUsable + ' usable · ' + t.poolSampled + ' sampled');
   }
   dbgKindLines('search', t.search).forEach(r => lines.push('  ' + r));
   dbgKindLines('meta', t.meta).forEach(r => lines.push('  ' + r));
@@ -1007,6 +1015,7 @@ function dbgInit() {
   });
   document.body.appendChild(dbgBox);
   dbgAttachVideo();
+  dbgTuneStart('page load', { name: 'lineup boot race' }, null, tuneToken);
   window.room206Debug = () => { console.log(dbgReport()); return dbgTunes; };
 }
 const CHANNEL_LOAD_STAGGER_MS = 250;
@@ -1559,16 +1568,16 @@ function firstPlayable(ids, minDurationSeconds, priority) {
     });
   });
 }
-async function pickPlayableFromPool(pool, minDurationSeconds, priority = IA_BACKGROUND) {
+async function pickPlayableFromPool(pool, minDurationSeconds, priority = IA_BACKGROUND, channel = '') {
   const usable = shuffle(pool).filter(id => !iaIsDud(id));
   const candidates = usable.slice(0, 10);
   const BATCH_SIZE = 10;
-  dbgPool(pool.length, usable.length, candidates.length);
+  dbgPool(pool.length, usable.length, candidates.length, channel);
   for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
     const found = await firstPlayable(candidates.slice(i, i + BATCH_SIZE), minDurationSeconds, priority);
-    if (found) { dbgEvent('candidate won', found.identifier); return found; }
+    if (found) { dbgEvent('candidate won', (channel ? channel + ' · ' : '') + found.identifier); return found; }
   }
-  dbgEvent('no candidate', candidates.length, ' sampled, none playable');
+  dbgEvent('no candidate', (channel ? channel + ' · ' : '') + candidates.length, ' sampled, none playable');
   return null;
 }
 const HARVEST_POOL_SIZE = 25;
@@ -1658,7 +1667,7 @@ async function loadChannel(ch, priority = IA_BACKGROUND) {
       try {
         const pool = await getPool();
         if (!pool.length) return null;
-        return await pickPlayableFromPool(pool, minDuration, priority);
+        return await pickPlayableFromPool(pool, minDuration, priority, ch.name);
       } catch (e) {
         return null;
       }
@@ -2616,6 +2625,7 @@ async function bootReveal(index) {
     video.volume = muted ? currentVolume : 0;
     triggerBloom();
     await startPlayback();
+    dbgPlaying();
     fadeVolumeIn();
     hint.classList.add('show');
     setTimeout(() => hint.classList.remove('show'), 4500);
