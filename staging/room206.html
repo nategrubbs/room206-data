@@ -763,24 +763,37 @@ function dbgTuneStart(reason, ch, index, token) {
 }
 function dbgEvent(label, a, b) {
   if (!DEBUG_ON || !dbgTune) return;
-  dbgTune.events.push({
-    ms: dbgNow() - dbgTune.t0,
+  dbgEventOn(dbgTune, label, a, b);
+}
+function dbgEventOn(rec, label, a, b) {
+  if (!DEBUG_ON || !rec) return;
+  rec.events.push({
+    ms: dbgNow() - rec.t0,
     label,
     detail: (a == null ? '' : String(a)) + (b == null ? '' : String(b))
   });
   dbgRender();
 }
-function dbgRequest(kind, priority, startedAt, outcome, budgetMs, label) {
-  if (!DEBUG_ON || !dbgTune) return;
+function dbgRecordFor(token) {
+  if (token === undefined) return dbgTune;
+  for (let i = dbgTunes.length - 1; i >= 0; i--) {
+    if (dbgTunes[i].token === token) return dbgTunes[i];
+  }
+  return null;
+}
+function dbgRequest(kind, priority, startedAt, outcome, budgetMs, label, token) {
+  if (!DEBUG_ON) return;
+  const rec = dbgRecordFor(token);
+  if (!rec) return;
   const ms = Date.now() - startedAt;
   const fg = priority === IA_FOREGROUND;
-  const b = (kind === 'search' ? dbgTune.search : dbgTune.meta)[fg ? 'fg' : 'bg'];
+  const b = (kind === 'search' ? rec.search : rec.meta)[fg ? 'fg' : 'bg'];
   b.sent++;
   if (outcome === 'ok') { b.answered++; b.ms.push(ms); }
   else if (outcome === 'timeout') b.timedOut++;
   else b.failed++;
   if (budgetMs > b.budgetMs) b.budgetMs = budgetMs;
-  dbgEvent(kind + ' ' + outcome, ms + 'ms · ' + (fg ? 'foreground' : 'background'),
+  dbgEventOn(rec, kind + ' ' + outcome, ms + 'ms · ' + (fg ? 'foreground' : 'background'),
     label ? ' · ' + label : '');
 }
 function dbgCacheHit(kind, priority, label, count) {
@@ -1403,6 +1416,7 @@ async function fetchWithRetry(url, opts = {}) {
     delay = 1000,
     label = ''
   } = opts;
+  const token = DEBUG_ON ? (opts.token !== undefined ? opts.token : tuneToken) : undefined;
   while (Date.now() < iaBackoffUntil) {
     await wait(iaBackoffUntil - Date.now() + Math.random() * IA_BACKOFF_JITTER_MS);
   }
@@ -1422,25 +1436,25 @@ async function fetchWithRetry(url, opts = {}) {
   }
   if (failure) {
     iaNoteFailure(timedOut, kind);
-    dbgRequest(kind, priority, startedAt, timedOut ? 'timeout' : 'error', timeoutMs, label);
+    dbgRequest(kind, priority, startedAt, timedOut ? 'timeout' : 'error', timeoutMs, label, token);
     if (retriesLeft > 0 && !timedOut) {
       await new Promise(r => setTimeout(r, delay));
-      return fetchWithRetry(url, { ...opts, retriesLeft: retriesLeft - 1, delay: delay * 2 });
+      return fetchWithRetry(url, { ...opts, token, retriesLeft: retriesLeft - 1, delay: delay * 2 });
     }
     throw failure;
   }
   if (res.ok) {
     iaNoteSuccess(Date.now() - startedAt, kind);
-    dbgRequest(kind, priority, startedAt, 'ok', timeoutMs, label);
+    dbgRequest(kind, priority, startedAt, 'ok', timeoutMs, label, token);
     return res;
   }
   if (res.status >= 500 && retriesLeft > 0) {
     iaNoteFailure(false, kind);
-    dbgRequest(kind, priority, startedAt, 'http ', timeoutMs, res.status);
+    dbgRequest(kind, priority, startedAt, 'http ', timeoutMs, res.status, token);
     await new Promise(r => setTimeout(r, delay));
-    return fetchWithRetry(url, { ...opts, retriesLeft: retriesLeft - 1, delay: delay * 2 });
+    return fetchWithRetry(url, { ...opts, token, retriesLeft: retriesLeft - 1, delay: delay * 2 });
   }
-  dbgRequest(kind, priority, startedAt, 'http ', timeoutMs, res.status);
+  dbgRequest(kind, priority, startedAt, 'http ', timeoutMs, res.status, token);
   throw new Error(`HTTP ${res.status}`);
 }
 const IA_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -1745,7 +1759,7 @@ function loadAndWarm(ch, priority = IA_BACKGROUND) {
 }
 const PRELOAD_AHEAD = 2;
 const PRELOAD_BEHIND = 1;
-function preloadWindow(priority = IA_BACKGROUND) {
+function preloadWindow(priority = IA_BACKGROUND, onEach = null) {
   const n = CHANNELS.length;
   const seen = new Set();
   const targets = [];
@@ -1757,7 +1771,10 @@ function preloadWindow(priority = IA_BACKGROUND) {
     if (!todo.length) return resolve([]);
     let outstanding = todo.length;
     staggerStart(todo, ch => {
-      loadAndWarm(ch, priority).then(() => { if (--outstanding === 0) resolve(todo); });
+      loadAndWarm(ch, priority).then(() => {
+        if (onEach) onEach(ch);
+        if (--outstanding === 0) resolve(todo);
+      });
     });
   });
 }
@@ -2655,15 +2672,22 @@ dbgInit();
     dayModePrimed = true;
     setTimeout(() => primeLineup(CHANNELS_SATURDAY_MORNING), DAY_PRIME_DELAY_MS);
   }
+  function revealFirstReady(channels) {
+    if (booted) return true;
+    const ch = channels.find(c => c && c.ready === true);
+    if (!ch) return false;
+    booted = true;
+    bootReveal(CHANNELS.indexOf(ch)).then(releaseWindow);
+    return true;
+  }
   function releaseWindow() {
     if (windowReleased) return;
     windowReleased = true;
-    preloadWindow().then(started => {
-      if (!booted && started.length && started.every(c => c.ready !== true)) {
-        stopTuningAnimation();
-        showTuningScreen();
-        showTuningMessage('NO SIGNAL');
-      }
+    preloadWindow(IA_BACKGROUND, ch => revealFirstReady([ch])).then(started => {
+      if (booted || !started.length) return;
+      stopTuningAnimation();
+      showTuningScreen();
+      showTuningMessage('NO SIGNAL');
     });
     primeDayModeSoon();
   }
@@ -2671,12 +2695,8 @@ dbgInit();
     loadChannel(ch, inRace ? IA_FOREGROUND : IA_BACKGROUND).then(() => {
       if (inRace) raceOutstanding--;
       if (ch.ready) warmChannel(ch);
-      if (ch.ready && !booted) {
-        booted = true;
-        bootReveal(i).then(releaseWindow);
-      } else if (inRace && raceOutstanding === 0 && !booted) {
-        releaseWindow();
-      }
+      if (revealFirstReady([ch])) return;
+      if (inRace && raceOutstanding === 0) releaseWindow();
     });
   }
   CHANNELS.slice(0, BOOT_RACE_SIZE).forEach((ch, i) => loadOne(ch, i, true));
