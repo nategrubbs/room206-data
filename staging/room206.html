@@ -704,7 +704,7 @@ function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 const DEBUG_ON = (() => {
   try { return /(?:^|[?&])debug=1(?:&|$)/.test(location.search); } catch (e) { return false; }
 })();
-const DBG_MAX_TUNES = 12;
+const DBG_MAX_TUNES = 40;
 const dbgTunes = [];
 let dbgTune = null;
 let dbgSeq = 0;
