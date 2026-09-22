@@ -386,6 +386,9 @@
 <script>
 const FALLBACK_ENGLISH = 'collection:(feature_films) AND mediatype:(movies) AND language:(English OR eng)';
 const FALLBACK_INTL = 'collection:(feature_films) AND mediatype:(movies) AND -language:(English) AND -language:(eng) AND language:(*) AND -year:[2010 TO 9999]';
+const eraFallback = years =>
+  `mediatype:(movies) AND year:[${years}] AND (language:(English OR eng) OR (*:* AND -language:[* TO *]))`;
+const FALLBACK_CLASSIC_TV = 'mediatype:(movies) AND subject:("television series" OR television OR "tv series" OR "classic tv" OR sitcom) AND (language:(English OR eng) OR (*:* AND -language:[* TO *]))';
 const AM_YEAR_CAP = '-year:[2010 TO 9999]';
 const AM_DROP_IN_RANGE = [0.05, 0.25];
 const AM_FAMILY_FILTER = 'AND -subject:(softcore OR "soft core" OR sexploitation OR striptease OR stripper OR nudist OR "adult film" OR "adult video" OR playboy OR penthouse OR burlesque OR risque OR "sex comedy")';
@@ -394,10 +397,10 @@ const MIN_DURATION_SECONDS = 30 * 60;
 const TOON_SOURCES = 'mediatype:(movies) AND (collection:(classic_cartoons) OR collection:(animationandcartoons) OR collection:(more_animation))';
 const BMOVIE_SCHLOCK = 'collection:(feature_films) AND mediatype:(movies) AND language:(English OR eng) AND subject:("b movies" OR "b-movies" OR schlock OR "cult film" OR cult)';
 const CHANNELS_LATE_NIGHT = [
-  { name: 'nineties',   prefix: 'JAMZ',  network: 'JAMZ 90s TV', number: 4,  queries: ['collection:(feature_films) AND mediatype:(movies) AND year:[1990 TO 1999] AND (language:(English OR eng) OR (*:* AND -language:[* TO *]))'] },
-  { name: 'y2k',        prefix: 'Y2K',   network: 'Y2K NET', number: 9,  queries: ['collection:(feature_films) AND mediatype:(movies) AND year:[2000 TO 2009] AND (language:(English OR eng) OR (*:* AND -language:[* TO *]))'] },
-  { name: 'eighties',   prefix: 'RAD',   network: 'RAD 80s TV', number: 13, queries: ['collection:(feature_films) AND mediatype:(movies) AND year:[1980 TO 1989] AND (language:(English OR eng) OR (*:* AND -language:[* TO *]))'] },
-  { name: 'tvshows',    prefix: 'RERUN', network: 'RERUN CLASSIC TV', number: 22, queries: ['collection:(classic_tv) AND mediatype:(movies) AND (language:(English OR eng) OR (*:* AND -language:[* TO *]))', 'mediatype:(movies) AND subject:(television series) AND (language:(English OR eng) OR (*:* AND -language:[* TO *]))'] },
+  { name: 'nineties',   prefix: 'JAMZ',  network: 'JAMZ 90s TV', number: 4,  queries: ['collection:(feature_films) AND mediatype:(movies) AND year:[1990 TO 1999] AND (language:(English OR eng) OR (*:* AND -language:[* TO *]))'], fallback: eraFallback('1990 TO 1999') },
+  { name: 'y2k',        prefix: 'Y2K',   network: 'Y2K NET', number: 9,  queries: ['collection:(feature_films) AND mediatype:(movies) AND year:[2000 TO 2009] AND (language:(English OR eng) OR (*:* AND -language:[* TO *]))'], fallback: eraFallback('2000 TO 2009') },
+  { name: 'eighties',   prefix: 'RAD',   network: 'RAD 80s TV', number: 13, queries: ['collection:(feature_films) AND mediatype:(movies) AND year:[1980 TO 1989] AND (language:(English OR eng) OR (*:* AND -language:[* TO *]))'], fallback: eraFallback('1980 TO 1989') },
+  { name: 'tvshows',    prefix: 'RERUN', network: 'RERUN CLASSIC TV', number: 22, queries: ['collection:(classic_tv) AND mediatype:(movies) AND (language:(English OR eng) OR (*:* AND -language:[* TO *]))', 'mediatype:(movies) AND subject:(television series) AND (language:(English OR eng) OR (*:* AND -language:[* TO *]))'], fallback: FALLBACK_CLASSIC_TV },
   {
     name: 'cartoons', prefix: 'TOON', network: 'TOON TIME', number: 27,
     balancedQueries: [1930, 1940, 1950, 1960, 1970].map(decade =>
