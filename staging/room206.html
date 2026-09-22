@@ -393,6 +393,7 @@ const AM_YEAR_CAP = '-year:[2010 TO 9999]';
 const AM_DROP_IN_RANGE = [0.05, 0.25];
 const AM_FAMILY_FILTER = 'AND -subject:(softcore OR "soft core" OR sexploitation OR striptease OR stripper OR nudist OR "adult film" OR "adult video" OR playboy OR penthouse OR burlesque OR risque OR "sex comedy")';
 const FALLBACK_FAMILY = `collection:(prelinger OR classic_tv) AND mediatype:(movies) ${AM_YEAR_CAP}`;
+const FALLBACK_AM_Y2K = 'mediatype:(movies) AND subject:(sitcom OR "situation comedy" OR comedy OR "television series" OR television) AND year:[2000 TO 2009] AND -title:("Funny or Die") AND -title:(Teaser OR Promo)';
 const MIN_DURATION_SECONDS = 30 * 60;
 const TOON_SOURCES = 'mediatype:(movies) AND (collection:(classic_cartoons) OR collection:(animationandcartoons) OR collection:(more_animation))';
 const BMOVIE_SCHLOCK = 'collection:(feature_films) AND mediatype:(movies) AND language:(English OR eng) AND subject:("b movies" OR "b-movies" OR schlock OR "cult film" OR cult)';
@@ -604,7 +605,7 @@ const CHANNELS_SATURDAY_MORNING = [
     queries: [`mediatype:(movies) AND subject:(sitcom OR "situation comedy") AND year:[2000 TO 2009] AND -title:("Funny or Die") AND -title:(Teaser OR Promo) ${AM_YEAR_CAP}`],
     minDurationSeconds: 15 * 60,
     dropInRange: AM_DROP_IN_RANGE,
-    fallback: FALLBACK_FAMILY
+    fallback: FALLBACK_AM_Y2K
   },
   {
     name: 'am_kids_tv', prefix: 'KIDZ', network: 'KIDZ MORNING TV', number: 13,
