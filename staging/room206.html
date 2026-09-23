@@ -709,6 +709,9 @@ function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 const DEBUG_ON = (() => {
   try { return /(?:^|[?&])debug=1(?:&|$)/.test(location.search); } catch (e) { return false; }
 })();
+const HARVEST_ON = (() => {
+  try { return /(?:^|[?&])harvest=1(?:&|$)/.test(location.search); } catch (e) { return false; }
+})();
 const DBG_MAX_TUNES = 40;
 const dbgTunes = [];
 let dbgTune = null;
@@ -1556,6 +1559,7 @@ async function fetchCandidateMeta(id, priority = IA_BACKGROUND) {
       meta = {
         title: title || id,
         year: yearMatch ? yearMatch[0] : null,
+        file: file.name,
         url: `https://archive.org/download/${id}/${encodeURIComponent(file.name)}`,
         duration
       };
@@ -1608,10 +1612,11 @@ async function harvestChannel(channelOrName, targetCount = HARVEST_POOL_SIZE) {
   if (!ch) throw new Error(`harvestChannel: no channel named "${channelOrName}"`);
   const minDuration = ch.minDurationSeconds || MIN_DURATION_SECONDS;
   const fallback = ch.fallback || (ch.name === 'nonenglish' ? FALLBACK_INTL : FALLBACK_ENGLISH);
+  const safety = ch.familySafe ? ' ' + AM_FAMILY_FILTER : '';
   const getPools = ch.balancedQueries
-    ? [() => searchBalancedPool(ch.balancedQueries, 200, IA_BACKGROUND, ch.balancedWeights)]
-    : ch.queries.map(q => () => searchPool(q, 200));
-  getPools.push(() => searchPool(fallback, 200));
+    ? [() => searchBalancedPool(ch.balancedQueries.map(q => q + safety), 200, IA_BACKGROUND, ch.balancedWeights)]
+    : ch.queries.map(q => () => searchPool(q + safety, 200));
+  getPools.push(() => searchPool(fallback + safety, 200));
   const found = new Map();
   for (const getPool of getPools) {
     if (found.size >= targetCount) break;
@@ -1622,7 +1627,7 @@ async function harvestChannel(channelOrName, targetCount = HARVEST_POOL_SIZE) {
       if (found.has(id)) continue;
       const pick = await checkCandidate(id, minDuration);
       if (pick) {
-        found.set(id, { identifier: pick.identifier, title: pick.title, year: pick.year, url: pick.url, duration: pick.duration });
+        found.set(id, { identifier: pick.identifier, file: pick.file, title: pick.title, year: pick.year, duration: pick.duration, weight: 1 });
         console.log(`[harvest] ${ch.name}: ${found.size}/${targetCount} — ${pick.title}`);
       }
       await wait(HARVEST_PACE_MS);
@@ -2662,11 +2667,21 @@ const DAY_PRIME_DELAY_MS = 8000;
 dbgInit();
 (function init() {
   startTuningAnimation('ACQUIRING SIGNAL');
+  if (HARVEST_ON) return;
   let booted = false;
   const BOOT_RACE_SIZE = 2;
   let raceOutstanding = BOOT_RACE_SIZE;
   let windowReleased = false;
   let dayModePrimed = false;
+  let declared = false;
+  function declareNoSignal() {
+    if (declared || booted) return;
+    declared = true;
+    stopTuningAnimation();
+    showTuningScreen();
+    showTuningMessage('NO SIGNAL');
+  }
+  setTimeout(declareNoSignal, LOAD_CHANNEL_DEADLINE_MS);
   function primeDayModeSoon() {
     if (dayModePrimed) return;
     dayModePrimed = true;
@@ -2683,11 +2698,8 @@ dbgInit();
   function releaseWindow() {
     if (windowReleased) return;
     windowReleased = true;
-    preloadWindow(IA_BACKGROUND, ch => revealFirstReady([ch])).then(started => {
-      if (booted || !started.length) return;
-      stopTuningAnimation();
-      showTuningScreen();
-      showTuningMessage('NO SIGNAL');
+    preloadWindow(IA_BACKGROUND, ch => revealFirstReady([ch])).then(() => {
+      declareNoSignal();
     });
     primeDayModeSoon();
   }
