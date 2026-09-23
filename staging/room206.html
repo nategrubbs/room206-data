@@ -1603,6 +1603,64 @@ async function pickPlayableFromPool(pool, minDurationSeconds, priority = IA_BACK
   dbgEvent('no candidate', (channel ? channel + ' · ' : '') + candidates.length, ' sampled, none playable');
   return null;
 }
+const NIGHTLY_LISTS_URL = 'https://nategrubbs.github.io/room206-data/nightly/channels.json';
+const NIGHTLY_BOOT_WAIT_MS = 1500;
+const NIGHTLY_MAX_AGE_DAYS = 14;
+const NIGHTLY_MIN_ITEMS = 5;
+function nightlyRecordOk(r) {
+  return !!r && typeof r.identifier === 'string' && r.identifier
+    && typeof r.file === 'string' && r.file
+    && typeof r.duration === 'number' && r.duration > 0;
+}
+function applyNightlyLists(data) {
+  const byName = new Map();
+  for (const ch of [...CHANNELS_LATE_NIGHT, ...CHANNELS_SATURDAY_MORNING]) byName.set(ch.name, ch);
+  const claimed = new Map();
+  for (const r of (Array.isArray(data.report) ? data.report : [])) {
+    if (r && typeof r.name === 'string') claimed.set(r.name, !!r.familySafe);
+  }
+  let applied = 0;
+  for (const [name, items] of Object.entries(data.channels || {})) {
+    const ch = byName.get(name);
+    if (!ch || !Array.isArray(items)) continue;
+    if (claimed.get(name) !== !!ch.familySafe) {
+      dbgEvent('nightly skipped', name, ' · familySafe mismatch between file and lineup');
+      continue;
+    }
+    const usable = items.filter(nightlyRecordOk);
+    if (usable.length < NIGHTLY_MIN_ITEMS) {
+      dbgEvent('nightly thin', name, ` · ${usable.length}/${NIGHTLY_MIN_ITEMS} — drawing live`);
+      continue;
+    }
+    ch.curated = (ch.curated || []).concat(usable);
+    applied++;
+  }
+  return applied;
+}
+async function fetchNightlyLists() {
+  if (HARVEST_ON) return false;
+  let timer = null;
+  try {
+    const ctrl = new AbortController();
+    timer = setTimeout(() => ctrl.abort(), NIGHTLY_BOOT_WAIT_MS);
+    const res = await fetch(NIGHTLY_LISTS_URL, { signal: ctrl.signal, cache: 'no-cache' });
+    if (!res.ok) { dbgEvent('nightly unavailable', String(res.status), ' · drawing live'); return false; }
+    const data = await res.json();
+    const ageDays = (Date.now() - Date.parse(data.generated_at)) / 86400000;
+    if (!(ageDays >= 0) || ageDays > NIGHTLY_MAX_AGE_DAYS) {
+      dbgEvent('nightly stale', data.generated_at || 'no timestamp', ' · drawing live');
+      return false;
+    }
+    const applied = applyNightlyLists(data);
+    dbgEvent('nightly lists', `${applied} channels`, ` · built ${Math.round(ageDays * 24)}h ago`);
+    return applied > 0;
+  } catch (e) {
+    dbgEvent('nightly unavailable', (e && e.name) || 'error', ' · drawing live');
+    return false;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 const HARVEST_POOL_SIZE = 25;
 const HARVEST_PACE_MS = 300;
 async function harvestChannel(channelOrName, targetCount = HARVEST_POOL_SIZE) {
@@ -2711,7 +2769,9 @@ dbgInit();
       if (inRace && raceOutstanding === 0) releaseWindow();
     });
   }
-  CHANNELS.slice(0, BOOT_RACE_SIZE).forEach((ch, i) => loadOne(ch, i, true));
+  fetchNightlyLists().then(() => {
+    CHANNELS.slice(0, BOOT_RACE_SIZE).forEach((ch, i) => loadOne(ch, i, true));
+  });
 })();
 </script>
 </body>
