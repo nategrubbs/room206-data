@@ -392,6 +392,10 @@ const FALLBACK_CLASSIC_TV = 'mediatype:(movies) AND subject:("television series"
 const AM_YEAR_CAP = '-year:[2010 TO 9999]';
 const AM_DROP_IN_RANGE = [0.05, 0.25];
 const AM_FAMILY_FILTER = 'AND -subject:(softcore OR "soft core" OR sexploitation OR striptease OR stripper OR nudist OR "adult film" OR "adult video" OR playboy OR penthouse OR burlesque OR risque OR "sex comedy")';
+const AM_DENY_FILTER = 'AND -title:("adult swim" OR "aqua teen" OR aquateen OR "hunger force" OR "nick at nite" OR mtv OR "the grind" OR "alternative nation" OR "nypd blue" OR "twilight zone" OR "late night" OR "midnight run" OR "midnight special" OR wartime)';
+function amSafetyClause(ch) {
+  return ch.familySafe ? ' ' + AM_FAMILY_FILTER + ' ' + AM_DENY_FILTER : '';
+}
 const FALLBACK_FAMILY = `collection:(prelinger OR classic_tv) AND mediatype:(movies) ${AM_YEAR_CAP}`;
 const FALLBACK_AM_Y2K = 'mediatype:(movies) AND subject:(sitcom OR "situation comedy" OR "television series" OR television) AND year:[2000 TO 2009] AND -title:("Funny or Die") AND -title:(Teaser OR Promo)';
 const FALLBACK_AM_TOON = 'mediatype:(movies) AND subject:(cartoon OR cartoons OR animation OR animated OR "animated series") AND year:[1980 TO 2009] AND (language:(English OR eng) OR (*:* AND -language:[* TO *]))';
@@ -1670,7 +1674,7 @@ async function harvestChannel(channelOrName, targetCount = HARVEST_POOL_SIZE) {
   if (!ch) throw new Error(`harvestChannel: no channel named "${channelOrName}"`);
   const minDuration = ch.minDurationSeconds || MIN_DURATION_SECONDS;
   const fallback = ch.fallback || (ch.name === 'nonenglish' ? FALLBACK_INTL : FALLBACK_ENGLISH);
-  const safety = ch.familySafe ? ' ' + AM_FAMILY_FILTER : '';
+  const safety = amSafetyClause(ch);
   const getPools = ch.balancedQueries
     ? [() => searchBalancedPool(ch.balancedQueries.map(q => q + safety), 200, IA_BACKGROUND, ch.balancedWeights)]
     : ch.queries.map(q => () => searchPool(q + safety, 200));
@@ -1734,7 +1738,7 @@ async function loadChannel(ch, priority = IA_BACKGROUND) {
       return;
     }
   }
-  const safety = ch.familySafe ? ' ' + AM_FAMILY_FILTER : '';
+  const safety = amSafetyClause(ch);
   const steps = ch.balancedQueries
     ? [() => searchBalancedPool(ch.balancedQueries.map(q => q + safety), 50, priority, ch.balancedWeights)]
     : ch.queries.map(q => () => searchPool(q + safety, 50, priority));
