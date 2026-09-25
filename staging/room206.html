@@ -1636,7 +1636,8 @@ function applyNightlyLists(data) {
       dbgEvent('nightly thin', name, ` · ${usable.length}/${NIGHTLY_MIN_ITEMS} — drawing live`);
       continue;
     }
-    ch.curated = (ch.curated || []).concat(usable);
+    ch.curated = (ch.curated || []).concat(usable.map(r => ({ ...r, nightly: true })));
+    ch.nightlyApplied = true;
     applied++;
   }
   return applied;
@@ -1731,10 +1732,13 @@ async function loadChannel(ch, priority = IA_BACKGROUND) {
   const minDuration = ch.minDurationSeconds || MIN_DURATION_SECONDS;
   if (ch.curated && ch.curated.length) {
     const buckets = (ch.balancedQueries || ch.queries || []).length + 1;
-    const curatedShare = ch.curatedShare != null ? ch.curatedShare : 1 / buckets;
+    const curatedShare = ch.nightlyApplied ? 1
+      : ch.curatedShare != null ? ch.curatedShare
+      : 1 / buckets;
     if (Math.random() < curatedShare) {
       const pick = pickWeighted(ch.curated);
-      applyPick(ch, { ...pick, url: `https://archive.org/download/${pick.identifier}/${encodeURIComponent(pick.file)}` }, 'curated');
+      applyPick(ch, { ...pick, url: `https://archive.org/download/${pick.identifier}/${encodeURIComponent(pick.file)}` },
+        pick.nightly ? 'nightly' : 'curated');
       return;
     }
   }
@@ -2017,19 +2021,47 @@ function waitForVideoReady() {
 }
 async function attemptVideoLoad(myToken) {
   const readyPromise = waitForVideoReady().then(() => 'ready').catch(() => 'error');
+  const giveUp = watchForVideoSilence();
   video.load();
   const FAST_PATH_MS = 250;
   let outcome = await Promise.race([readyPromise, wait(FAST_PATH_MS).then(() => 'pending')]);
-  if (myToken !== tuneToken) return 'aborted';
+  if (myToken !== tuneToken) { giveUp.cancel(); return 'aborted'; }
   if (outcome === 'pending') {
     showTuningScreen('gray');
     startTuningAnimation('TUNING');
-    outcome = await Promise.race([readyPromise, wait(VIDEO_READY_TIMEOUT_MS - FAST_PATH_MS).then(() => 'timeout')]);
-    if (myToken !== tuneToken) return 'aborted';
+    outcome = await Promise.race([readyPromise, giveUp.promise]);
+    if (myToken !== tuneToken) { giveUp.cancel(); return 'aborted'; }
   }
+  giveUp.cancel();
   return (outcome === 'ready' && video.readyState >= 1) ? 'ready' : outcome;
 }
-const VIDEO_READY_TIMEOUT_MS = 4000;
+const VIDEO_SILENCE_MS = 6000;
+const VIDEO_TOTAL_MS = 20000;
+const VIDEO_SILENCE_POLL_MS = 250;
+function watchForVideoSilence() {
+  const startedAt = Date.now();
+  let lastByteAt = startedAt;
+  let timer = null;
+  const onProgress = () => { lastByteAt = Date.now(); };
+  video.addEventListener('progress', onProgress);
+  function cancel() {
+    if (timer !== null) { clearInterval(timer); timer = null; }
+    video.removeEventListener('progress', onProgress);
+  }
+  const promise = new Promise(resolve => {
+    timer = setInterval(() => {
+      const now = Date.now();
+      if (now - lastByteAt >= VIDEO_SILENCE_MS) {
+        cancel();
+        resolve(`timeout: nothing arrived for ${Math.round((now - lastByteAt) / 1000)}s`);
+      } else if (now - startedAt >= VIDEO_TOTAL_MS) {
+        cancel();
+        resolve(`timeout: still not playable after ${Math.round((now - startedAt) / 1000)}s`);
+      }
+    }, VIDEO_SILENCE_POLL_MS);
+  });
+  return { promise, cancel };
+}
 const VIDEO_LOAD_ATTEMPTS = 1;
 const CHANNEL_PLAY_FAIL_LIMIT = 3;
 async function waitReadyAndPlay(ch, myToken) {
@@ -2692,7 +2724,9 @@ async function bootReveal(index) {
     video.src = ch.url;
     video.load();
     const minHold = wait(1500 + Math.random() * 1000);
-    const outcome = await Promise.race([readyPromise, wait(VIDEO_READY_TIMEOUT_MS).then(() => 'timeout')]);
+    const giveUp = watchForVideoSilence();
+    const outcome = await Promise.race([readyPromise, giveUp.promise]);
+    giveUp.cancel();
     await minHold;
     if (myToken !== tuneToken) return;
     if (outcome !== 'ready' || video.readyState < 1) {
