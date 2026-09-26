@@ -2075,7 +2075,7 @@ function waitForVideoReady() {
     video.addEventListener('error', onErr);
   });
 }
-async function attemptVideoLoad(myToken) {
+async function attemptVideoLoad(ch, myToken) {
   const readyPromise = waitForVideoReady().then(() => 'ready').catch(() => 'error');
   const giveUp = watchVideoProgress();
   video.load();
@@ -2088,25 +2088,36 @@ async function attemptVideoLoad(myToken) {
     outcome = await Promise.race([readyPromise, giveUp.promise]);
     if (myToken !== tuneToken) { giveUp.cancel(); return 'aborted'; }
   }
+  if (outcome !== 'ready') { giveUp.cancel(); return outcome; }
+  if (video.readyState < 1) { giveUp.cancel(); return 'error'; }
+  const dropIn = currentPosition(ch);
+  dbgSeekTo(dropIn);
+  if (!NOSEEK_ON) video.currentTime = dropIn;
+  video.volume = currentVolume;
+  outcome = await Promise.race([
+    startPlayback().then(started => started ? 'ready' : 'gesture'),
+    giveUp.promise
+  ]);
   giveUp.cancel();
-  return (outcome === 'ready' && video.readyState >= 1) ? 'ready' : outcome;
+  if (myToken !== tuneToken) return 'aborted';
+  if (outcome !== 'ready' && outcome !== 'gesture') video.pause();
+  return outcome;
 }
 const VIDEO_CONNECT_MS = 12000;
 const VIDEO_SILENCE_MS = 3000;
 const VIDEO_TOTAL_MS = 20000;
 const VIDEO_WATCH_POLL_MS = 250;
-function watchVideoProgress() {
+function watchVideoProgress({ connected = false } = {}) {
   const startedAt = Date.now();
   let lastSignAt = startedAt;
-  let alive = false;
+  let alive = connected;
   let timer = null;
+  const SIGNS = ['progress', 'loadedmetadata', 'loadeddata', 'seeked', 'canplay'];
   const onSign = () => { alive = true; lastSignAt = Date.now(); };
-  video.addEventListener('progress', onSign);
-  video.addEventListener('loadedmetadata', onSign);
+  SIGNS.forEach(e => video.addEventListener(e, onSign));
   function cancel() {
     if (timer !== null) { clearInterval(timer); timer = null; }
-    video.removeEventListener('progress', onSign);
-    video.removeEventListener('loadedmetadata', onSign);
+    SIGNS.forEach(e => video.removeEventListener(e, onSign));
   }
   const promise = new Promise(resolve => {
     timer = setInterval(() => {
@@ -2120,6 +2131,7 @@ function watchVideoProgress() {
           cancel();
           resolve(`timeout: nothing at all after ${since(startedAt)}s (connect)`);
         }
+      } else if (video.seeking) {
       } else if (now - lastSignAt >= VIDEO_SILENCE_MS) {
         cancel();
         resolve(`timeout: went quiet for ${since(lastSignAt)}s after starting`);
@@ -2137,11 +2149,11 @@ async function waitReadyAndPlay(ch, myToken) {
   video.src = ch.url;
   let outcome;
   for (let attempt = 1; attempt <= VIDEO_LOAD_ATTEMPTS; attempt++) {
-    outcome = await attemptVideoLoad(myToken);
+    outcome = await attemptVideoLoad(ch, myToken);
     if (outcome === 'aborted') return false;
-    if (outcome === 'ready') break;
+    if (outcome === 'ready' || outcome === 'gesture') break;
   }
-  if (outcome !== 'ready') {
+  if (outcome !== 'ready' && outcome !== 'gesture') {
     ch.playFailCount = (ch.playFailCount || 0) + 1;
     if (ch.playFailCount >= CHANNEL_PLAY_FAIL_LIMIT) {
       ch.ready = false;
@@ -2164,13 +2176,8 @@ async function waitReadyAndPlay(ch, myToken) {
     return false;
   }
   ch.playFailCount = 0;
-  const dropIn = currentPosition(ch);
-  dbgSeekTo(dropIn);
-  if (!NOSEEK_ON) video.currentTime = dropIn;
-  video.volume = currentVolume;
-  const started = await startPlayback();
   stopTuningAnimation();
-  if (started) {
+  if (outcome === 'ready') {
     rebaseChannelClock(ch);
     if (KEEPTWIN_ON) releaseWarm(ch);
     hideTuningScreen();
@@ -2830,7 +2837,32 @@ async function bootReveal(index) {
     if (KEEPTWIN_ON) releaseWarm(ch);
     video.volume = muted ? currentVolume : 0;
     triggerBloom();
-    await startPlayback();
+    const giveUpPlay = watchVideoProgress({ connected: true });
+    const played = await Promise.race([
+      startPlayback().then(started => started ? 'ready' : 'gesture'),
+      giveUpPlay.promise
+    ]);
+    giveUpPlay.cancel();
+    if (myToken !== tuneToken) return;
+    if (played !== 'ready' && played !== 'gesture') {
+      video.pause();
+      ch.ready = false;
+      dbgFail('signal lost', played);
+      showTuningScreen();
+      showTuningMessage('SIGNAL LOST');
+      switching = false;
+      await wait(1300);
+      if (myToken === tuneToken) nextChannel();
+      return;
+    }
+    if (played === 'gesture') {
+      video.volume = currentVolume;
+      showTuningScreen();
+      showTuningMessage('PRESS ANY BUTTON');
+      dbgResult('waiting for a gesture', 'autoplay refused — channel is loaded and paused');
+      switching = false;
+      return;
+    }
     dbgPlaying();
     fadeVolumeIn();
     hint.classList.add('show');
