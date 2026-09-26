@@ -716,6 +716,12 @@ const DEBUG_ON = (() => {
 const HARVEST_ON = (() => {
   try { return /(?:^|[?&])harvest=1(?:&|$)/.test(location.search); } catch (e) { return false; }
 })();
+const NOSEEK_ON = (() => {
+  try { return /(?:^|[?&])noseek=1(?:&|$)/.test(location.search); } catch (e) { return false; }
+})();
+const PROBE_ON = (() => {
+  try { return /(?:^|[?&])probe=1(?:&|$)/.test(location.search); } catch (e) { return false; }
+})();
 const DBG_MAX_TUNES = 40;
 const dbgTunes = [];
 let dbgTune = null;
@@ -834,8 +840,15 @@ function dbgPick(ch, pick, fraction, source) {
     ' · drop-in ' + dbgTune.pick.dropPct + '%');
 }
 function dbgVideoStateText() {
+  let buffered = 'none';
+  try {
+    const b = video.buffered;
+    if (b && b.length) buffered = b.start(0).toFixed(1) + '-' + b.end(b.length - 1).toFixed(1) + 's';
+  } catch (e) { buffered = 'unreadable'; }
   return 'readyState ' + video.readyState +
     ' · networkState ' + video.networkState +
+    ' · buffered ' + buffered +
+    ' · t ' + (isFinite(video.currentTime) ? video.currentTime.toFixed(1) : '?') + 's' +
     ' · error ' + (video.error
       ? 'code ' + video.error.code + ' (' + (video.error.message || 'no message') + ')'
       : 'none');
@@ -854,7 +867,10 @@ function dbgPlaying() {
 }
 function dbgFail(result, outcome) {
   if (!DEBUG_ON || !dbgTune) return;
-  dbgTune.fail = { outcome, state: dbgVideoStateText(), url: video.currentSrc || video.src || '' };
+  dbgTune.fail = {
+    outcome, state: dbgVideoStateText(), url: video.currentSrc || video.src || '',
+    progress: dbgTune.progressCount || 0,
+  };
   dbgResult(result, outcome + ' · ' + dbgTune.fail.state);
 }
 function dbgAutoplay(state) {
@@ -862,7 +878,9 @@ function dbgAutoplay(state) {
   dbgTune.autoplay = state;
   dbgEvent('autoplay', state);
 }
-const DBG_VIDEO_EVENTS = ['loadstart', 'loadedmetadata', 'canplay', 'playing', 'waiting', 'stalled', 'error'];
+const DBG_VIDEO_EVENTS = ['loadstart', 'progress', 'loadeddata', 'loadedmetadata', 'canplay',
+  'playing', 'waiting', 'stalled', 'seeking', 'seeked', 'error'];
+const DBG_MAX_PROGRESS_LINES = 3;
 function dbgAttachVideo() {
   if (!DEBUG_ON) return;
   DBG_VIDEO_EVENTS.forEach(name => {
@@ -870,8 +888,12 @@ function dbgAttachVideo() {
       if (!dbgTune) return;
       const at = dbgNow() - dbgTune.t0;
       if (dbgTune.video[name] == null) dbgTune.video[name] = at;
-      dbgEvent('video ' + name, name === 'error' || name === 'stalled' || name === 'waiting'
-        ? dbgVideoStateText() : '');
+      if (name === 'progress') {
+        dbgTune.progressCount = (dbgTune.progressCount || 0) + 1;
+        dbgTune.progressLast = at;
+        if (dbgTune.progressCount > DBG_MAX_PROGRESS_LINES) return;
+      }
+      dbgEvent('video ' + name, dbgVideoStateText());
     });
   });
 }
@@ -908,9 +930,12 @@ function dbgKindLines(label, pair) {
   return rows;
 }
 function dbgVideoLine(t) {
+  const prog = t.progressCount
+    ? ' · progress x' + t.progressCount + (t.progressLast != null ? ' (last ' + t.progressLast + 'ms)' : '')
+    : ' · progress NONE';
   const v = t.video;
-  const seen = DBG_VIDEO_EVENTS.filter(n => v[n] != null).map(n => n + ' ' + v[n] + 'ms');
-  return 'video:  ' + (seen.length ? seen.join(' · ') : 'no events');
+  const seen = DBG_VIDEO_EVENTS.filter(n => n !== 'progress' && v[n] != null).map(n => n + ' ' + v[n] + 'ms');
+  return 'video:  ' + (seen.length ? seen.join(' · ') : 'no events') + prog;
 }
 function dbgTuneText(t) {
   const lines = [];
@@ -937,7 +962,7 @@ function dbgTuneText(t) {
   dbgKindLines('meta', t.meta).forEach(r => lines.push('  ' + r));
   lines.push('  ' + dbgVideoLine(t));
   if (t.autoplay) lines.push('  autoplay: ' + t.autoplay);
-  if (t.fail) lines.push('  at failure: ' + t.fail.state);
+  if (t.fail) lines.push('  at failure: ' + t.fail.state + ' · progress events ' + (t.fail.progress != null ? t.fail.progress : '?'));
   lines.push('  timeline:');
   t.events.forEach(e => {
     lines.push('    ' + dbgPad('+' + e.ms + 'ms', 9) + dbgPad(e.label, 20) + e.detail);
@@ -952,6 +977,7 @@ function dbgReport() {
     'net now: ' + dbgNetText(dbgNet()),
     'ua: ' + navigator.userAgent,
     'mode: ' + (typeof dayMode !== 'undefined' && dayMode ? 'Saturday Morning' : 'Late Night'),
+    'flags: ' + ([NOSEEK_ON ? 'noseek' : null, PROBE_ON ? 'probe' : null].filter(Boolean).join(', ') || 'none'),
     ''
   ];
   if (!dbgTunes.length) return head.join('\n') + 'no channel changes recorded yet';
@@ -1914,6 +1940,24 @@ function showTuningMessage(text) {
   tuningTextEl.classList.add('msg');
   tuningTextEl.textContent = text;
 }
+async function dbgProbeFirstBytes(url) {
+  const started = dbgNow();
+  try {
+    const res = await fetch(url, { headers: { Range: 'bytes=0-32767' } });
+    const headersAt = Math.round(dbgNow() - started);
+    const buf = await res.arrayBuffer();
+    dbgEvent('probe first byte', headersAt + 'ms',
+      ` · status ${res.status} · ${buf.byteLength}B in ${Math.round(dbgNow() - started)}ms`);
+  } catch (e) {
+    dbgEvent('probe failed', (e && e.name) || String(e), ` · after ${Math.round(dbgNow() - started)}ms`);
+  }
+}
+function dbgSeekTo(target) {
+  if (!DEBUG_ON || !dbgTune) return;
+  dbgTune.seekTarget = Math.round(target);
+  dbgEvent('seek requested', Math.round(target) + 's',
+    NOSEEK_ON ? ' · SUPPRESSED by ?noseek=1' : '');
+}
 function prepVideoForBloom() {
   video.classList.add('pre-bloom');
 }
@@ -2067,6 +2111,10 @@ const CHANNEL_PLAY_FAIL_LIMIT = 3;
 async function waitReadyAndPlay(ch, myToken) {
   applyAudioState();
   releaseAllWarm();
+  if (PROBE_ON) {
+    await dbgProbeFirstBytes(ch.url);
+    if (myToken !== tuneToken) return false;
+  }
   video.src = ch.url;
   let outcome;
   for (let attempt = 1; attempt <= VIDEO_LOAD_ATTEMPTS; attempt++) {
@@ -2097,12 +2145,20 @@ async function waitReadyAndPlay(ch, myToken) {
     return false;
   }
   ch.playFailCount = 0;
-  video.currentTime = currentPosition(ch);
+  const dropIn = currentPosition(ch);
+  dbgSeekTo(dropIn);
+  if (!NOSEEK_ON) video.currentTime = dropIn;
   video.volume = currentVolume;
-  await startPlayback();
+  const started = await startPlayback();
   stopTuningAnimation();
-  hideTuningScreen();
-  dbgPlaying();
+  if (started) {
+    hideTuningScreen();
+    dbgPlaying();
+  } else {
+    showTuningScreen();
+    showTuningMessage('PRESS ANY BUTTON');
+    dbgResult('waiting for a gesture', 'autoplay refused — channel is loaded and paused');
+  }
   switching = false;
   const next = CHANNELS[(activeIndex + 1) % CHANNELS.length];
   if (next && next !== ch) warmChannel(next);
@@ -2681,6 +2737,7 @@ function startCableLineLoop() {
   cableLineRafId = requestAnimationFrame(stepCableLine);
 }
 setInterval(() => {
+  if (NOSEEK_ON) return;
   const ch = CHANNELS[activeIndex];
   if (!ch || !ch.ready || video.paused || switching) return;
   const expected = currentPosition(ch);
@@ -2721,6 +2778,10 @@ async function bootReveal(index) {
     applyAudioState();
     releaseAllWarm();
     const readyPromise = waitForVideoReady().then(() => 'ready').catch(() => 'error');
+    if (PROBE_ON) {
+      await dbgProbeFirstBytes(ch.url);
+      if (myToken !== tuneToken) return;
+    }
     video.src = ch.url;
     video.load();
     const minHold = wait(1500 + Math.random() * 1000);
@@ -2744,7 +2805,9 @@ async function bootReveal(index) {
     triggerStatic();
     await wait(180);
     if (myToken !== tuneToken) return;
-    video.currentTime = currentPosition(ch);
+    const bootDropIn = currentPosition(ch);
+    dbgSeekTo(bootDropIn);
+    if (!NOSEEK_ON) video.currentTime = bootDropIn;
     video.volume = muted ? currentVolume : 0;
     triggerBloom();
     await startPlayback();
