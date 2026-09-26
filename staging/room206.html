@@ -719,8 +719,11 @@ const HARVEST_ON = (() => {
 const NOSEEK_ON = (() => {
   try { return /(?:^|[?&])noseek=1(?:&|$)/.test(location.search); } catch (e) { return false; }
 })();
-const PROBE_ON = (() => {
-  try { return /(?:^|[?&])probe=1(?:&|$)/.test(location.search); } catch (e) { return false; }
+const KEEPTWIN_ON = (() => {
+  try { return /(?:^|[?&])keeptwin=1(?:&|$)/.test(location.search); } catch (e) { return false; }
+})();
+const PRECONNECT_ON = (() => {
+  try { return /(?:^|[?&])preconnect=1(?:&|$)/.test(location.search); } catch (e) { return false; }
 })();
 const DBG_MAX_TUNES = 40;
 const dbgTunes = [];
@@ -977,7 +980,8 @@ function dbgReport() {
     'net now: ' + dbgNetText(dbgNet()),
     'ua: ' + navigator.userAgent,
     'mode: ' + (typeof dayMode !== 'undefined' && dayMode ? 'Saturday Morning' : 'Late Night'),
-    'flags: ' + ([NOSEEK_ON ? 'noseek' : null, PROBE_ON ? 'probe' : null].filter(Boolean).join(', ') || 'none'),
+    'flags: ' + ([NOSEEK_ON ? 'noseek' : null, KEEPTWIN_ON ? 'keeptwin' : null,
+      PRECONNECT_ON ? 'preconnect' : null].filter(Boolean).join(', ') || 'none'),
     ''
   ];
   if (!dbgTunes.length) return head.join('\n') + 'no channel changes recorded yet';
@@ -1815,6 +1819,22 @@ function releaseWarm(ch) {
 function releaseAllWarm() {
   [...warmedChannels].forEach(releaseWarm);
 }
+function releaseAllWarmExcept(keep) {
+  [...warmedChannels].forEach(ch => { if (ch !== keep) releaseWarm(ch); });
+}
+function dbgTwinState(ch) {
+  if (!DEBUG_ON || !dbgTune) return;
+  const pre = ch && ch.preloadEl;
+  if (!pre) return dbgEvent('twin', 'none held', KEEPTWIN_ON ? ' · keeptwin on' : '');
+  const same = pre.src === ch.url;
+  let buffered = 'none';
+  try {
+    const b = pre.buffered;
+    if (b && b.length) buffered = b.start(0).toFixed(1) + '-' + b.end(b.length - 1).toFixed(1) + 's';
+  } catch (e) { buffered = 'unreadable'; }
+  dbgEvent('twin', same ? 'same url' : 'DIFFERENT url',
+    ` · readyState ${pre.readyState} · buffered ${buffered}` + (KEEPTWIN_ON ? ' · kept' : ' · releasing'));
+}
 function warmChannel(ch) {
   if (!ch.ready || ch.warmed) return;
   while (warmedChannels.length >= MAX_WARM_CHANNELS) releaseWarm(warmedChannels[0]);
@@ -1879,6 +1899,10 @@ function currentPosition(ch) {
   const elapsed = (Date.now() - ch.startEpoch) / 1000;
   return ((elapsed % ch.duration) + ch.duration) % ch.duration;
 }
+function rebaseChannelClock(ch) {
+  if (!ch || !isFinite(video.currentTime) || !isFinite(ch.duration) || ch.duration <= 0) return;
+  ch.startEpoch = Date.now() - video.currentTime * 1000;
+}
 function buildProgressBar(ch) {
   const totalChars = 26;
   const frac = Math.min(1, Math.max(0, currentPosition(ch) / ch.duration));
@@ -1939,18 +1963,6 @@ function stopTuningAnimation() {
 function showTuningMessage(text) {
   tuningTextEl.classList.add('msg');
   tuningTextEl.textContent = text;
-}
-async function dbgProbeFirstBytes(url) {
-  const started = dbgNow();
-  try {
-    const res = await fetch(url, { headers: { Range: 'bytes=0-32767' } });
-    const headersAt = Math.round(dbgNow() - started);
-    const buf = await res.arrayBuffer();
-    dbgEvent('probe first byte', headersAt + 'ms',
-      ` · status ${res.status} · ${buf.byteLength}B in ${Math.round(dbgNow() - started)}ms`);
-  } catch (e) {
-    dbgEvent('probe failed', (e && e.name) || String(e), ` · after ${Math.round(dbgNow() - started)}ms`);
-  }
 }
 function dbgSeekTo(target) {
   if (!DEBUG_ON || !dbgTune) return;
@@ -2065,7 +2077,7 @@ function waitForVideoReady() {
 }
 async function attemptVideoLoad(myToken) {
   const readyPromise = waitForVideoReady().then(() => 'ready').catch(() => 'error');
-  const giveUp = watchForVideoSilence();
+  const giveUp = watchVideoProgress();
   video.load();
   const FAST_PATH_MS = 250;
   let outcome = await Promise.race([readyPromise, wait(FAST_PATH_MS).then(() => 'pending')]);
@@ -2079,30 +2091,40 @@ async function attemptVideoLoad(myToken) {
   giveUp.cancel();
   return (outcome === 'ready' && video.readyState >= 1) ? 'ready' : outcome;
 }
-const VIDEO_SILENCE_MS = 6000;
+const VIDEO_CONNECT_MS = 12000;
+const VIDEO_SILENCE_MS = 3000;
 const VIDEO_TOTAL_MS = 20000;
-const VIDEO_SILENCE_POLL_MS = 250;
-function watchForVideoSilence() {
+const VIDEO_WATCH_POLL_MS = 250;
+function watchVideoProgress() {
   const startedAt = Date.now();
-  let lastByteAt = startedAt;
+  let lastSignAt = startedAt;
+  let alive = false;
   let timer = null;
-  const onProgress = () => { lastByteAt = Date.now(); };
-  video.addEventListener('progress', onProgress);
+  const onSign = () => { alive = true; lastSignAt = Date.now(); };
+  video.addEventListener('progress', onSign);
+  video.addEventListener('loadedmetadata', onSign);
   function cancel() {
     if (timer !== null) { clearInterval(timer); timer = null; }
-    video.removeEventListener('progress', onProgress);
+    video.removeEventListener('progress', onSign);
+    video.removeEventListener('loadedmetadata', onSign);
   }
   const promise = new Promise(resolve => {
     timer = setInterval(() => {
       const now = Date.now();
-      if (now - lastByteAt >= VIDEO_SILENCE_MS) {
+      const since = t => Math.round((now - t) / 1000);
+      if (now - startedAt >= VIDEO_TOTAL_MS) {
         cancel();
-        resolve(`timeout: nothing arrived for ${Math.round((now - lastByteAt) / 1000)}s`);
-      } else if (now - startedAt >= VIDEO_TOTAL_MS) {
+        resolve(`timeout: still not playable after ${since(startedAt)}s`);
+      } else if (!alive) {
+        if (now - startedAt >= VIDEO_CONNECT_MS) {
+          cancel();
+          resolve(`timeout: nothing at all after ${since(startedAt)}s (connect)`);
+        }
+      } else if (now - lastSignAt >= VIDEO_SILENCE_MS) {
         cancel();
-        resolve(`timeout: still not playable after ${Math.round((now - startedAt) / 1000)}s`);
+        resolve(`timeout: went quiet for ${since(lastSignAt)}s after starting`);
       }
-    }, VIDEO_SILENCE_POLL_MS);
+    }, VIDEO_WATCH_POLL_MS);
   });
   return { promise, cancel };
 }
@@ -2110,11 +2132,8 @@ const VIDEO_LOAD_ATTEMPTS = 1;
 const CHANNEL_PLAY_FAIL_LIMIT = 3;
 async function waitReadyAndPlay(ch, myToken) {
   applyAudioState();
-  releaseAllWarm();
-  if (PROBE_ON) {
-    await dbgProbeFirstBytes(ch.url);
-    if (myToken !== tuneToken) return false;
-  }
+  dbgTwinState(ch);
+  if (KEEPTWIN_ON) releaseAllWarmExcept(ch); else releaseAllWarm();
   video.src = ch.url;
   let outcome;
   for (let attempt = 1; attempt <= VIDEO_LOAD_ATTEMPTS; attempt++) {
@@ -2152,6 +2171,8 @@ async function waitReadyAndPlay(ch, myToken) {
   const started = await startPlayback();
   stopTuningAnimation();
   if (started) {
+    rebaseChannelClock(ch);
+    if (KEEPTWIN_ON) releaseWarm(ch);
     hideTuningScreen();
     dbgPlaying();
   } else {
@@ -2776,16 +2797,13 @@ async function bootReveal(index) {
       return;
     }
     applyAudioState();
-    releaseAllWarm();
+    dbgTwinState(ch);
+    if (KEEPTWIN_ON) releaseAllWarmExcept(ch); else releaseAllWarm();
     const readyPromise = waitForVideoReady().then(() => 'ready').catch(() => 'error');
-    if (PROBE_ON) {
-      await dbgProbeFirstBytes(ch.url);
-      if (myToken !== tuneToken) return;
-    }
     video.src = ch.url;
     video.load();
     const minHold = wait(1500 + Math.random() * 1000);
-    const giveUp = watchForVideoSilence();
+    const giveUp = watchVideoProgress();
     const outcome = await Promise.race([readyPromise, giveUp.promise]);
     giveUp.cancel();
     await minHold;
@@ -2808,6 +2826,8 @@ async function bootReveal(index) {
     const bootDropIn = currentPosition(ch);
     dbgSeekTo(bootDropIn);
     if (!NOSEEK_ON) video.currentTime = bootDropIn;
+    rebaseChannelClock(ch);
+    if (KEEPTWIN_ON) releaseWarm(ch);
     video.volume = muted ? currentVolume : 0;
     triggerBloom();
     await startPlayback();
@@ -2823,6 +2843,13 @@ async function bootReveal(index) {
   }
 }
 const DAY_PRIME_DELAY_MS = 8000;
+if (PRECONNECT_ON) {
+  const link = document.createElement('link');
+  link.rel = 'preconnect';
+  link.href = 'https://archive.org';
+  link.crossOrigin = 'anonymous';
+  document.head.appendChild(link);
+}
 dbgInit();
 (function init() {
   startTuningAnimation('ACQUIRING SIGNAL');
