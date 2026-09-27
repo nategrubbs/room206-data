@@ -182,6 +182,30 @@
       2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000,
       2px 0 0 #000, -2px 0 0 #000, 0 2px 0 #000, 0 -2px 0 #000;
   }
+  #tuning.offair::before { animation: none; opacity: 0; }
+  #tuning.offair {
+    background: linear-gradient(90deg,
+      #bfbfbf 0 14.2857%, #bfbf00 14.2857% 28.5714%, #00bfbf 28.5714% 42.8571%,
+      #00bf00 42.8571% 57.1428%, #bf00bf 57.1428% 71.4285%, #bf0000 71.4285% 85.7142%,
+      #0000bf 85.7142% 100%);
+  }
+  #tuning.offair #tuning-text { display: none; }
+  #offair { display: none; }
+  #tuning.offair #offair {
+    display: flex; flex-direction: column; align-items: center; gap: 0.35em;
+    padding: 0.55em 1.3em;
+    background: rgba(0,0,0,0.82);
+  }
+  #offair-title {
+    font: 700 clamp(22px, calc(var(--screen-w) * 0.05), 40px)/1 'VT323', ui-monospace, "Courier New", monospace;
+    color: #fff;
+    letter-spacing: 0.18em;
+  }
+  #offair-sub {
+    font: 400 clamp(11px, calc(var(--screen-w) * 0.022), 18px)/1 'VT323', ui-monospace, "Courier New", monospace;
+    color: #bfbfbf;
+    letter-spacing: 0.14em;
+  }
   #tuning.gray #tuning-text.msg {
     color: #33ff33;
     text-shadow: 0 0 6px rgba(51,255,51,0.85), 0 0 16px rgba(51,255,51,0.45);
@@ -365,7 +389,7 @@
         <video id="screen" muted autoplay playsinline disablepictureinpicture x-webkit-airplay="allow"
           controlslist="nodownload nofullscreen noremoteplayback" tabindex="-1"></video>
         <canvas id="fx" width="160" height="90"></canvas>
-        <div id="tuning"><span id="tuning-text">ACQUIRING SIGNAL...</span></div>
+        <div id="tuning"><span id="tuning-text">ACQUIRING SIGNAL...</span><div id="offair"><span id="offair-title">OFF AIR</span><span id="offair-sub">PRESS ANY BUTTON TO TUNE</span></div></div>
         <div id="chnum"></div>
         <div id="info"></div>
         <div id="hint">↑ / ↓ or click to change channel&nbsp;&nbsp;·&nbsp;&nbsp;spacebar for info</div>
@@ -698,6 +722,8 @@ const smokeEl = document.getElementById('smoke');
 let consecutiveTuneFailures = 0;
 const SMOKE_LEVELS = [1, 2, 3];
 const SMOKE_MAX_LEVEL = SMOKE_LEVELS.length;
+const OFF_AIR_AFTER_FAILURES = 6;
+let offAir = false;
 function smokeHash(i, j) {
   let h = Math.imul(i, 374761393) ^ Math.imul(j, 668265263);
   h = Math.imul(h ^ (h >>> 13), 1274126177);
@@ -862,6 +888,9 @@ function updateSmoke() {
   }
   if (smokeEl.dataset.level !== String(level)) smokeEl.dataset.level = String(level);
   if (level === 0) smokeStop(); else smokeStart(level);
+}
+function updateOffAir() {
+  tuningEl.classList.toggle('offair', offAir && !poweredOff);
 }
 const SMOKE_BASE_OVERLAP = 0.06;
 const SMOKE_SIDE_DEPTH = 0.38;
@@ -2206,6 +2235,10 @@ function hideTuningScreen() {
     consecutiveTuneFailures = 0;
     updateSmoke();
   }
+  if (offAir) {
+    offAir = false;
+    updateOffAir();
+  }
 }
 let tuningDotsTimer = null;
 function startTuningAnimation(label) {
@@ -2227,6 +2260,10 @@ function showTuningMessage(text) {
   tuningTextEl.textContent = text;
   consecutiveTuneFailures++;
   updateSmoke();
+  if (consecutiveTuneFailures >= OFF_AIR_AFTER_FAILURES) {
+    offAir = true;
+    updateOffAir();
+  }
 }
 function dbgSeekTo(target) {
   if (!DEBUG_ON || !dbgTune) return;
@@ -2493,14 +2530,14 @@ async function tuneTo(index) {
     }
     switching = false;
     await wait(1100);
-    if (myToken === tuneToken) nextChannel();
+    if (myToken === tuneToken) autoAdvanceAfterFailure();
     return;
   }
   triggerStatic();
   const ok = await waitReadyAndPlay(ch, myToken);
   if (!ok && myToken === tuneToken) {
     switching = false;
-    nextChannel();
+    autoAdvanceAfterFailure();
   }
 }
 async function cycleChannelContent(index) {
@@ -2518,7 +2555,7 @@ async function cycleChannelContent(index) {
     showTuningMessage(`${ch.prefix ? ch.prefix + ' ' : ''}CHANNEL UNAVAILABLE`);
     switching = false;
     await wait(1300);
-    if (myToken === tuneToken) nextChannel();
+    if (myToken === tuneToken) autoAdvanceAfterFailure();
     return;
   }
   updateInfoOverlay(ch);
@@ -2526,7 +2563,7 @@ async function cycleChannelContent(index) {
   const ok = await waitReadyAndPlay(ch, myToken);
   if (!ok && myToken === tuneToken) {
     switching = false;
-    nextChannel();
+    autoAdvanceAfterFailure();
   }
 }
 video.addEventListener('ended', () => {
@@ -2534,6 +2571,10 @@ video.addEventListener('ended', () => {
   if (ch && ch.cycleOnEnd) cycleChannelContent(activeIndex);
 });
 function nextChannel() { tuneTo(activeIndex + 1); }
+function autoAdvanceAfterFailure() {
+  if (offAir) return;
+  nextChannel();
+}
 function prevChannel() { tuneTo(activeIndex - 1); }
 let wakeLockSentinel = null;
 function acquireWakeLock() {
@@ -2567,7 +2608,7 @@ video.addEventListener('error', () => {
   if (ch) ch.ready = false;
   showTuningScreen();
   showTuningMessage('SIGNAL LOST');
-  setTimeout(nextChannel, 1300);
+  setTimeout(autoAdvanceAfterFailure, 1300);
 });
 const STALL_TIMEOUT_MS = 12000;
 let lastPlaybackTime = -1;
@@ -2599,7 +2640,7 @@ setInterval(() => {
   );
   showTuningScreen();
   showTuningMessage('SIGNAL LOST');
-  setTimeout(nextChannel, 1300);
+  setTimeout(autoAdvanceAfterFailure, 1300);
 }, 1000);
 document.addEventListener('contextmenu', e => e.preventDefault());
 function onFirstInteraction() {
@@ -2651,6 +2692,7 @@ async function togglePower() {
   poweredOff = !poweredOff;
   applyAudioState();
   updateSmoke();
+  updateOffAir();
   playThunk();
   if (poweredOff) {
     powerOffAt = Date.now();
@@ -3065,7 +3107,7 @@ async function bootReveal(index) {
       await wait(1300);
       if (myToken !== tuneToken) return;
       switching = false;
-      nextChannel();
+      autoAdvanceAfterFailure();
       return;
     }
     applyAudioState();
@@ -3087,7 +3129,7 @@ async function bootReveal(index) {
       showTuningMessage('SIGNAL LOST');
       switching = false;
       await wait(1300);
-      if (myToken === tuneToken) nextChannel();
+      if (myToken === tuneToken) autoAdvanceAfterFailure();
       return;
     }
     stopTuningAnimation();
@@ -3117,7 +3159,7 @@ async function bootReveal(index) {
       showTuningMessage('SIGNAL LOST');
       switching = false;
       await wait(1300);
-      if (myToken === tuneToken) nextChannel();
+      if (myToken === tuneToken) autoAdvanceAfterFailure();
       return;
     }
     if (played === 'gesture') {
