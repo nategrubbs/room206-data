@@ -182,16 +182,18 @@
       2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000,
       2px 0 0 #000, -2px 0 0 #000, 0 2px 0 #000, 0 -2px 0 #000;
   }
-  #tuning.offair::before { animation: none; opacity: 0; }
-  #tuning.offair {
+  #screen-frame.offair #tuning::before { animation: none; opacity: 0; }
+  #screen-frame.offair #tuning {
     background: linear-gradient(90deg,
       #bfbfbf 0 14.2857%, #bfbf00 14.2857% 28.5714%, #00bfbf 28.5714% 42.8571%,
       #00bf00 42.8571% 57.1428%, #bf00bf 57.1428% 71.4285%, #bf0000 71.4285% 85.7142%,
       #0000bf 85.7142% 100%);
   }
-  #tuning.offair #tuning-text { display: none; }
+  #screen-frame.offair #tuning-text { display: none; }
+  #screen-frame.offair #chnum,
+  #screen-frame.offair #info { display: none; }
   #offair { display: none; }
-  #tuning.offair #offair {
+  #screen-frame.offair #offair {
     display: flex; align-items: center; justify-content: center;
     padding: 0.55em 1.1em;
     background: rgba(0,0,0,0.82);
@@ -889,7 +891,7 @@ function updateSmoke() {
   if (level === 0) smokeStop(); else smokeStart(level);
 }
 function updateOffAir() {
-  tuningEl.classList.toggle('offair', offAir && !poweredOff);
+  screenFrame.classList.toggle('offair', offAir && !poweredOff);
 }
 const SMOKE_BASE_OVERLAP = 0.06;
 const SMOKE_SIDE_DEPTH = 0.38;
