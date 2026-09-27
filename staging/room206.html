@@ -66,6 +66,19 @@
     opacity: 0;
     transition: opacity 1500ms linear;
   }
+  #smoke {
+    position: absolute;
+    z-index: 12;
+    pointer-events: none;
+    display: none;
+  }
+  #smoke[data-level="1"], #smoke[data-level="2"], #smoke[data-level="3"] { display: block; }
+  #smoke canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
   #window-area {
     position: absolute;
     overflow: hidden;
@@ -363,6 +376,7 @@
     </div>
     <img id="roomImg" alt="">
     <img id="roomImgFade" alt="">
+    <div id="smoke" data-level="0" data-origin="top" aria-hidden="true"><canvas></canvas></div>
     <img id="remote" alt="" src="https://images.squarespace-cdn.com/content/61fa20755a19de45b0fc3cb4/7c6ecc4f-1379-4327-908d-325013c8f5fb/TVremote.png?content-type=image%2Fpng">
     <img id="remote-pressed" alt="" src="https://images.squarespace-cdn.com/content/61fa20755a19de45b0fc3cb4/6574702e-3289-4c4b-a549-a58f6d2c911e/TVremote-pressed.png?content-type=image%2Fpng">
     <svg id="cable-line"><path id="cable-line-path" fill="none" stroke="#000" stroke-linecap="round"/></svg>
@@ -680,6 +694,225 @@ const chnumEl = document.getElementById('chnum');
 const infoEl = document.getElementById('info');
 const screenFrame = document.getElementById('screen-frame');
 const windowArea = document.getElementById('window-area');
+const smokeEl = document.getElementById('smoke');
+let consecutiveTuneFailures = 0;
+const SMOKE_LEVELS = [1, 2, 3];
+const SMOKE_MAX_LEVEL = SMOKE_LEVELS.length;
+function smokeHash(i, j) {
+  let h = Math.imul(i, 374761393) ^ Math.imul(j, 668265263);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+function smokeNoise(x, y) {
+  const i = Math.floor(x), j = Math.floor(y);
+  const fx = x - i, fy = y - j;
+  const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+  const a = smokeHash(i, j), b = smokeHash(i + 1, j);
+  const c = smokeHash(i, j + 1), d = smokeHash(i + 1, j + 1);
+  return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
+}
+const SMOKE_NOISE_SCALE = 0.016;
+const SMOKE_NOISE_DRIFT = 0.25;
+const SMOKE_CURL_EPS = 0.6;
+function smokeCurl(x, y, t, out) {
+  const sx = x * SMOKE_NOISE_SCALE, sy = y * SMOKE_NOISE_SCALE, st = t * SMOKE_NOISE_DRIFT;
+  const e = SMOKE_CURL_EPS;
+  const n1 = smokeNoise(sx, sy + e + st), n2 = smokeNoise(sx, sy - e + st);
+  const n3 = smokeNoise(sx + e, sy + st), n4 = smokeNoise(sx - e, sy + st);
+  out.x = n1 - n2;
+  out.y = -(n3 - n4);
+}
+const SMOKE_SPEC = [
+  null,
+  { count: 26, rise: 20, alpha: 0.150, spread: 0.6, life: 5.2 },
+  { count: 46, rise: 25, alpha: 0.185, spread: 0.8, life: 5.8 },
+  { count: 68, rise: 30, alpha: 0.215, spread: 1.0, life: 6.4 },
+];
+const SMOKE_FPS = 30;
+const SMOKE_TURBULENCE = 58;
+const SMOKE_BUOYANCY = 1.25;
+const SMOKE_DRAG = 1.15;
+const SMOKE_SPRITE_PX = 64;
+const smokeCanvas = smokeEl.querySelector('canvas');
+let smokeCtx = null, smokeSprite = null;
+let smokeParticles = [];
+let smokeRaf = null;
+let smokeLastMs = 0, smokeAccum = 0, smokeClock = 0;
+let smokeBox = { w: 0, h: 0 };
+let smokeEmitters = [];
+let smokeUnit = 40;
+const smokeCurlOut = { x: 0, y: 0 };
+function smokeBuildSprite() {
+  const c = document.createElement('canvas');
+  c.width = c.height = SMOKE_SPRITE_PX;
+  const g = c.getContext('2d');
+  const r = SMOKE_SPRITE_PX / 2;
+  const grad = g.createRadialGradient(r, r, 0, r, r, r);
+  grad.addColorStop(0, 'rgba(214, 217, 222, 0.85)');
+  grad.addColorStop(0.35, 'rgba(196, 200, 207, 0.42)');
+  grad.addColorStop(0.68, 'rgba(174, 179, 187, 0.13)');
+  grad.addColorStop(1, 'rgba(158, 163, 170, 0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, SMOKE_SPRITE_PX, SMOKE_SPRITE_PX);
+  return c;
+}
+function smokeSpawn(p, spec, seeded) {
+  const e = smokeEmitters.length ? smokeEmitters[(Math.random() * smokeEmitters.length) | 0]
+                                 : { x: smokeBox.w / 2, y: smokeBox.h, w: smokeBox.w * 0.5, vx: 0 };
+  p.x = e.x + (Math.random() - 0.5) * e.w;
+  p.y = e.y + (Math.random() - 0.5) * (smokeUnit * 0.4);
+  p.vx = e.vx * (0.4 + Math.random() * 0.8);
+  p.vy = -spec.rise * (0.5 + Math.random() * 0.5);
+  p.life = spec.life * (0.7 + Math.random() * 0.6);
+  p.age = seeded ? Math.random() * p.life : 0;
+  p.size = smokeUnit * (0.45 + Math.random() * 0.6);
+  p.grow = 0.5 + Math.random() * 0.8;
+  p.tilt = 0.75 + Math.random() * 0.6;
+}
+function smokeResizePool(spec) {
+  while (smokeParticles.length > spec.count) smokeParticles.pop();
+  while (smokeParticles.length < spec.count) {
+    const p = {};
+    smokeSpawn(p, spec, true);
+    smokeParticles.push(p);
+  }
+}
+const SMOKE_WARMUP_STEPS = 90;
+function smokeWarmUp(spec) {
+  const step = 1 / SMOKE_FPS;
+  for (let i = 0; i < SMOKE_WARMUP_STEPS; i++) smokeStep(spec, step);
+}
+function smokeStep(spec, dt) {
+  smokeClock += dt;
+  for (const p of smokeParticles) {
+    p.age += dt;
+    if (p.age >= p.life) { smokeSpawn(p, spec, false); continue; }
+    smokeCurl(p.x, p.y, smokeClock, smokeCurlOut);
+    const drag = Math.exp(-SMOKE_DRAG * dt);
+    p.vx = (p.vx + smokeCurlOut.x * SMOKE_TURBULENCE * spec.spread * dt) * drag;
+    p.vy = (p.vy + smokeCurlOut.y * SMOKE_TURBULENCE * spec.spread * dt) * drag;
+    p.vy -= spec.rise * SMOKE_BUOYANCY * dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+  }
+}
+function smokeDraw(spec) {
+  const ctx = smokeCtx;
+  ctx.clearRect(0, 0, smokeBox.w, smokeBox.h);
+  for (const p of smokeParticles) {
+    const t = p.age / p.life;
+    const fade = t < 0.18 ? t / 0.18 : 1 - (t - 0.18) / 0.82;
+    if (fade <= 0) continue;
+    const s = p.size * (1 + p.grow * t);
+    const w = s * p.tilt, h = s / p.tilt;
+    ctx.globalAlpha = fade * spec.alpha;
+    ctx.drawImage(smokeSprite, p.x - w / 2, p.y - h / 2, w, h);
+  }
+  ctx.globalAlpha = 1;
+}
+function smokeFrame(now) {
+  const level = Number(smokeEl.dataset.level);
+  const spec = SMOKE_SPEC[level];
+  if (!spec) { smokeStop(); return; }
+  smokeRaf = requestAnimationFrame(smokeFrame);
+  const dt = Math.min(0.1, (now - smokeLastMs) / 1000);
+  smokeLastMs = now;
+  smokeAccum += dt;
+  const step = 1 / SMOKE_FPS;
+  if (smokeAccum < step) return;
+  smokeStep(spec, smokeAccum);
+  smokeAccum = 0;
+  smokeDraw(spec);
+}
+function smokeStop() {
+  if (smokeRaf !== null) { cancelAnimationFrame(smokeRaf); smokeRaf = null; }
+  if (smokeCtx) smokeCtx.clearRect(0, 0, smokeBox.w, smokeBox.h);
+}
+function smokeReducedMotion() {
+  try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; }
+}
+function smokeStart(level) {
+  const spec = SMOKE_SPEC[level];
+  if (!spec || !smokeBox.w || !smokeBox.h) { smokeStop(); return; }
+  if (!smokeCtx) {
+    smokeCtx = smokeCanvas.getContext('2d');
+    if (!smokeCtx) return;
+    smokeSprite = smokeBuildSprite();
+  }
+  const fresh = smokeParticles.length !== spec.count;
+  smokeResizePool(spec);
+  if (fresh) smokeWarmUp(spec);
+  if (smokeReducedMotion()) {
+    smokeStop();
+    smokeDraw(spec);
+    return;
+  }
+  if (smokeRaf === null) {
+    smokeLastMs = performance.now();
+    smokeAccum = 1 / SMOKE_FPS;
+    smokeRaf = requestAnimationFrame(smokeFrame);
+  }
+}
+function updateSmoke() {
+  let level = 0;
+  if (!poweredOff) {
+    for (let i = 0; i < SMOKE_LEVELS.length; i++) {
+      if (consecutiveTuneFailures >= SMOKE_LEVELS[i]) level = i + 1;
+    }
+  }
+  if (smokeEl.dataset.level !== String(level)) smokeEl.dataset.level = String(level);
+  if (level === 0) smokeStop(); else smokeStart(level);
+}
+const SMOKE_BASE_OVERLAP = 0.06;
+const SMOKE_SIDE_DEPTH = 0.38;
+const SMOKE_UNIT_OF_BAND = 0.55;
+const SMOKE_UNIT_OF_SIDE = 0.3;
+const SMOKE_UNIT_MIN = 26;
+const SMOKE_UNIT_MAX_OF_SET = 0.22;
+function syncSmokeGeometry() {
+  if (fullscreenActive) { smokeEl.style.display = 'none'; smokeStop(); return; }
+  smokeEl.style.display = '';
+  const vw = window.innerWidth;
+  const w = windowArea.offsetWidth, h = windowArea.offsetHeight;
+  const left = windowArea.offsetLeft, top = windowArea.offsetTop;
+  const headroom = Math.max(0, top);
+  const sideSpace = Math.max(0, Math.min(left, vw - (left + w)));
+  let boxW, boxH;
+  if (sideSpace > headroom) {
+    smokeEl.dataset.origin = 'sides';
+    boxW = vw;
+    boxH = top + h * SMOKE_SIDE_DEPTH;
+    smokeEl.style.left = '0px';
+    smokeEl.style.top = '0px';
+  } else {
+    smokeEl.dataset.origin = 'top';
+    boxW = w;
+    boxH = headroom + h * SMOKE_BASE_OVERLAP;
+    smokeEl.style.left = left + 'px';
+    smokeEl.style.top = (top - headroom) + 'px';
+  }
+  smokeEl.style.width = boxW + 'px';
+  smokeEl.style.height = boxH + 'px';
+  smokeBox.w = Math.max(1, Math.round(boxW));
+  smokeBox.h = Math.max(1, Math.round(boxH));
+  if (smokeCanvas.width !== smokeBox.w) smokeCanvas.width = smokeBox.w;
+  if (smokeCanvas.height !== smokeBox.h) smokeCanvas.height = smokeBox.h;
+  let unit;
+  if (smokeEl.dataset.origin === 'sides') {
+    unit = sideSpace * SMOKE_UNIT_OF_SIDE;
+    const seamY = smokeBox.h * 0.94, seamH = smokeBox.h * 0.5;
+    smokeEmitters = [
+      { x: left, y: seamY, w: seamH * 0.5, vx: -6 },
+      { x: left + w, y: seamY, w: seamH * 0.5, vx: 6 },
+    ];
+  } else {
+    unit = boxH * SMOKE_UNIT_OF_BAND;
+    smokeEmitters = [{ x: smokeBox.w * 0.5, y: smokeBox.h * 0.96, w: smokeBox.w * 0.62, vx: 0 }];
+  }
+  smokeUnit = Math.max(SMOKE_UNIT_MIN, Math.min(unit, w * SMOKE_UNIT_MAX_OF_SET));
+  const level = Number(smokeEl.dataset.level);
+  if (level > 0) { smokeParticles.length = 0; smokeStart(level); }
+}
 const powerOffEl = document.getElementById('power-off');
 const crtLineEl = document.getElementById('crt-line');
 const crtDotEl = document.getElementById('crt-dot');
@@ -1207,6 +1440,7 @@ function layout() {
     fullscreenExitIconEl.style.height = fsIconW + 'px';
     fullscreenExitIconEl.style.top = (r.bottom - fsIconW - 20 - FULLSCREEN_EXIT_HIT_PAD) + 'px';
     fullscreenExitIconEl.style.left = (r.right - fsIconW - 20 - FULLSCREEN_EXIT_HIT_PAD) + 'px';
+    syncSmokeGeometry();
     return;
   }
   fullscreenExitIconEl.style.display = 'none';
@@ -1294,6 +1528,7 @@ function layout() {
     fullscreenIconEl.style.top = (r.bottom + CABLE_PLUGGED_TOP * S) + 'px';
     fullscreenIconEl.style.left = r.left + 'px';
   }
+  syncSmokeGeometry();
 }
 window.addEventListener('resize', layout);
 window.matchMedia('(orientation: portrait)').addEventListener('change', layout);
@@ -1967,6 +2202,10 @@ function showTuningScreen(mode) {
 }
 function hideTuningScreen() {
   tuningEl.classList.add('hidden');
+  if (consecutiveTuneFailures !== 0) {
+    consecutiveTuneFailures = 0;
+    updateSmoke();
+  }
 }
 let tuningDotsTimer = null;
 function startTuningAnimation(label) {
@@ -1986,6 +2225,8 @@ function stopTuningAnimation() {
 function showTuningMessage(text) {
   tuningTextEl.classList.add('msg');
   tuningTextEl.textContent = text;
+  consecutiveTuneFailures++;
+  updateSmoke();
 }
 function dbgSeekTo(target) {
   if (!DEBUG_ON || !dbgTune) return;
@@ -2409,6 +2650,7 @@ async function togglePower() {
   crtTransitioning = true;
   poweredOff = !poweredOff;
   applyAudioState();
+  updateSmoke();
   playThunk();
   if (poweredOff) {
     powerOffAt = Date.now();
