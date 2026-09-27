@@ -192,19 +192,18 @@
   #tuning.offair #tuning-text { display: none; }
   #offair { display: none; }
   #tuning.offair #offair {
-    display: flex; flex-direction: column; align-items: center; gap: 0.35em;
-    padding: 0.55em 1.3em;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0.55em 1.1em;
     background: rgba(0,0,0,0.82);
+    max-width: 92%;
+    box-sizing: border-box;
   }
   #offair-title {
     font: 700 clamp(22px, calc(var(--screen-w) * 0.05), 40px)/1 'VT323', ui-monospace, "Courier New", monospace;
     color: #fff;
     letter-spacing: 0.18em;
-  }
-  #offair-sub {
-    font: 400 clamp(11px, calc(var(--screen-w) * 0.022), 18px)/1 'VT323', ui-monospace, "Courier New", monospace;
-    color: #bfbfbf;
-    letter-spacing: 0.14em;
+    margin-right: -0.18em;
+    white-space: nowrap;
   }
   #tuning.gray #tuning-text.msg {
     color: #33ff33;
@@ -389,7 +388,7 @@
         <video id="screen" muted autoplay playsinline disablepictureinpicture x-webkit-airplay="allow"
           controlslist="nodownload nofullscreen noremoteplayback" tabindex="-1"></video>
         <canvas id="fx" width="160" height="90"></canvas>
-        <div id="tuning"><span id="tuning-text">ACQUIRING SIGNAL...</span><div id="offair"><span id="offair-title">OFF AIR</span><span id="offair-sub">PRESS ANY BUTTON TO TUNE</span></div></div>
+        <div id="tuning"><span id="tuning-text">ACQUIRING SIGNAL...</span><div id="offair"><span id="offair-title">MALFUNCTION</span></div></div>
         <div id="chnum"></div>
         <div id="info"></div>
         <div id="hint">↑ / ↓ or click to change channel&nbsp;&nbsp;·&nbsp;&nbsp;spacebar for info</div>
