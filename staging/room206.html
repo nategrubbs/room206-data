@@ -1497,6 +1497,9 @@ async function fetchWithRetry(url, opts = {}) {
 const IA_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const IA_CACHE_PREFIX = 'ia_';
 const iaCacheMemory = new Map();
+function iaCacheEntryTtl(parsed) {
+  return (parsed && typeof parsed.ttl === 'number' && parsed.ttl > 0) ? parsed.ttl : IA_CACHE_TTL_MS;
+}
 function iaCacheGet(key) {
   const mem = iaCacheMemory.get(key);
   if (mem) return mem.data;
@@ -1505,7 +1508,7 @@ function iaCacheGet(key) {
   if (!stored) return undefined;
   try {
     const parsed = JSON.parse(stored);
-    if (Date.now() - parsed.timestamp > IA_CACHE_TTL_MS) {
+    if (Date.now() - parsed.timestamp > iaCacheEntryTtl(parsed)) {
       localStorage.removeItem(key);
       return undefined;
     }
@@ -1523,12 +1526,13 @@ function iaCachePrune(aggressive) {
     if (aggressive) { try { localStorage.removeItem(k); } catch (e) {} continue; }
     try {
       const parsed = JSON.parse(localStorage.getItem(k));
-      if (!parsed || now - parsed.timestamp > IA_CACHE_TTL_MS) localStorage.removeItem(k);
+      if (!parsed || now - parsed.timestamp > iaCacheEntryTtl(parsed)) localStorage.removeItem(k);
     } catch (e) { try { localStorage.removeItem(k); } catch (e2) {} }
   }
 }
-function iaCacheSet(key, data) {
+function iaCacheSet(key, data, ttlMs) {
   const entry = { timestamp: Date.now(), data };
+  if (ttlMs) entry.ttl = ttlMs;
   iaCacheMemory.set(key, entry);
   const write = () => localStorage.setItem(key, JSON.stringify(entry));
   try {
@@ -1649,6 +1653,11 @@ function nightlyRecordOk(r) {
 function applyNightlyLists(data) {
   const byName = new Map();
   for (const ch of [...CHANNELS_LATE_NIGHT, ...CHANNELS_SATURDAY_MORNING]) byName.set(ch.name, ch);
+  for (const ch of byName.values()) {
+    if (ch.curatedBaseline === undefined) ch.curatedBaseline = ch.curated || null;
+    ch.curated = ch.curatedBaseline;
+    ch.nightlyApplied = false;
+  }
   const claimed = new Map();
   for (const r of (Array.isArray(data.report) ? data.report : [])) {
     if (r && typeof r.name === 'string') claimed.set(r.name, !!r.familySafe);
@@ -1666,11 +1675,30 @@ function applyNightlyLists(data) {
       dbgEvent('nightly thin', name, ` · ${usable.length}/${NIGHTLY_MIN_ITEMS} — drawing live`);
       continue;
     }
-    ch.curated = (ch.curated || []).concat(usable.map(r => ({ ...r, nightly: true })));
+    ch.curated = (ch.curatedBaseline || []).concat(usable.map(r => ({ ...r, nightly: true })));
     ch.nightlyApplied = true;
     applied++;
   }
   return applied;
+}
+const NIGHTLY_CACHE_KEY = 'ia_nightly_channels';
+const NIGHTLY_CACHE_TTL_MS = NIGHTLY_MAX_AGE_DAYS * 86400000;
+function applyNightlyData(data, source) {
+  const ageDays = (Date.now() - Date.parse(data && data.generated_at)) / 86400000;
+  if (!(ageDays >= 0) || ageDays > NIGHTLY_MAX_AGE_DAYS) {
+    dbgEvent('nightly stale', (data && data.generated_at) || 'no timestamp', ` · ${source} — drawing live`);
+    return 0;
+  }
+  const applied = applyNightlyLists(data);
+  dbgEvent('nightly lists', `${applied} channels`, ` · built ${Math.round(ageDays * 24)}h ago · ${source}`);
+  return applied;
+}
+function seedNightlyFromCache() {
+  if (HARVEST_ON) return false;
+  let data;
+  try { data = iaCacheGet(NIGHTLY_CACHE_KEY); } catch (e) { return false; }
+  if (!data) return false;
+  try { return applyNightlyData(data, 'cache') > 0; } catch (e) { return false; }
 }
 async function fetchNightlyLists() {
   if (HARVEST_ON) return false;
@@ -1681,13 +1709,8 @@ async function fetchNightlyLists() {
     const res = await fetch(NIGHTLY_LISTS_URL, { signal: ctrl.signal, cache: 'no-cache' });
     if (!res.ok) { dbgEvent('nightly unavailable', String(res.status), ' · drawing live'); return false; }
     const data = await res.json();
-    const ageDays = (Date.now() - Date.parse(data.generated_at)) / 86400000;
-    if (!(ageDays >= 0) || ageDays > NIGHTLY_MAX_AGE_DAYS) {
-      dbgEvent('nightly stale', data.generated_at || 'no timestamp', ' · drawing live');
-      return false;
-    }
-    const applied = applyNightlyLists(data);
-    dbgEvent('nightly lists', `${applied} channels`, ` · built ${Math.round(ageDays * 24)}h ago`);
+    const applied = applyNightlyData(data, 'network');
+    if (applied > 0) iaCacheSet(NIGHTLY_CACHE_KEY, data, NIGHTLY_CACHE_TTL_MS);
     return applied > 0;
   } catch (e) {
     dbgEvent('nightly unavailable', (e && e.name) || 'error', ' · drawing live');
@@ -2929,9 +2952,10 @@ dbgInit();
       if (inRace && raceOutstanding === 0) releaseWindow();
     });
   }
-  fetchNightlyLists().then(() => {
-    CHANNELS.slice(0, BOOT_RACE_SIZE).forEach((ch, i) => loadOne(ch, i, true));
-  });
+  const startRace = () => CHANNELS.slice(0, BOOT_RACE_SIZE).forEach((ch, i) => loadOne(ch, i, true));
+  const nightlyRefresh = fetchNightlyLists();
+  if (seedNightlyFromCache()) startRace();
+  else nightlyRefresh.then(startRace);
 })();
 </script>
 </body>
