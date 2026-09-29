@@ -762,13 +762,16 @@ const SMOKE_DRAG = 1.15;
 const SMOKE_SPRITE_PX = 64;
 const smokeCanvas = smokeEl.querySelector('canvas');
 let smokeCtx = null, smokeSprite = null;
+let smokeMask = null;
+let smokeMaskX = 0, smokeMaskY = 0;
 let smokeParticles = [];
 let smokeRaf = null;
 let smokeLastMs = 0, smokeAccum = 0, smokeClock = 0;
-let smokeBox = { w: 0, h: 0 };
+let smokeBox = { left: 0, top: 0, w: 0, h: 0 };
 let smokeEmitters = [];
 let smokeUnit = 40;
 const smokeCurlOut = { x: 0, y: 0 };
+let smokeCabinet = { left: 0, top: 0, w: 0, h: 0, r: 0 };
 function smokeBuildSprite() {
   const c = document.createElement('canvas');
   c.width = c.height = SMOKE_SPRITE_PX;
@@ -823,6 +826,47 @@ function smokeStep(spec, dt) {
     p.y += p.vy * dt;
   }
 }
+const SMOKE_MASK_FEATHER = 10;
+const SMOKE_MASK_RING_ALPHA = 0.18;
+function smokeRoundRectPath(ctx, x, y, w, h, r) {
+  const rr = Math.max(0, Math.min(r, w / 2, h / 2));
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
+}
+function smokeBuildMask() {
+  smokeMask = null;
+  const cab = smokeCabinet, f = SMOKE_MASK_FEATHER;
+  if (!(cab.w > 0 && cab.h > 0 && smokeBox.w > 0 && smokeBox.h > 0)) return;
+  const cx = cab.left - smokeBox.left, cy = cab.top - smokeBox.top;
+  const x0 = Math.max(0, Math.floor(cx - f)), y0 = Math.max(0, Math.floor(cy - f));
+  const x1 = Math.min(smokeBox.w, Math.ceil(cx + cab.w + f));
+  const y1 = Math.min(smokeBox.h, Math.ceil(cy + cab.h + f));
+  if (x1 <= x0 || y1 <= y0) return;
+  const m = document.createElement('canvas');
+  m.width = x1 - x0;
+  m.height = y1 - y0;
+  const g = m.getContext('2d');
+  if (!g) return;
+  const rx = cx - x0, ry = cy - y0;
+  g.fillStyle = g.strokeStyle = '#fff';
+  g.globalAlpha = SMOKE_MASK_RING_ALPHA;
+  for (let i = f; i > 0; i--) {
+    g.lineWidth = i * 2;
+    smokeRoundRectPath(g, rx, ry, cab.w, cab.h, cab.r);
+    g.stroke();
+  }
+  g.globalAlpha = 1;
+  smokeRoundRectPath(g, rx, ry, cab.w, cab.h, cab.r);
+  g.fill();
+  smokeMask = m;
+  smokeMaskX = x0;
+  smokeMaskY = y0;
+}
 function smokeDraw(spec) {
   const ctx = smokeCtx;
   ctx.clearRect(0, 0, smokeBox.w, smokeBox.h);
@@ -836,6 +880,11 @@ function smokeDraw(spec) {
     ctx.drawImage(smokeSprite, p.x - w / 2, p.y - h / 2, w, h);
   }
   ctx.globalAlpha = 1;
+  if (smokeMask) {
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.drawImage(smokeMask, smokeMaskX, smokeMaskY);
+    ctx.globalCompositeOperation = 'source-over';
+  }
 }
 function smokeFrame(now) {
   const level = Number(smokeEl.dataset.level);
@@ -893,53 +942,52 @@ function updateSmoke() {
 function updateOffAir() {
   screenFrame.classList.toggle('offair', offAir && !poweredOff);
 }
-const SMOKE_BASE_OVERLAP = 0.06;
 const SMOKE_SIDE_DEPTH = 0.38;
-const SMOKE_UNIT_OF_BAND = 0.55;
-const SMOKE_UNIT_OF_SIDE = 0.3;
+const SMOKE_UNIT_OF_BAND = 0.65;
+const SMOKE_UNIT_OF_SIDE = 0.4;
 const SMOKE_UNIT_MIN = 26;
 const SMOKE_UNIT_MAX_OF_SET = 0.22;
 function syncSmokeGeometry() {
   if (fullscreenActive) { smokeEl.style.display = 'none'; smokeStop(); return; }
   smokeEl.style.display = '';
   const vw = window.innerWidth;
-  const w = windowArea.offsetWidth, h = windowArea.offsetHeight;
-  const left = windowArea.offsetLeft, top = windowArea.offsetTop;
-  const headroom = Math.max(0, top);
-  const sideSpace = Math.max(0, Math.min(left, vw - (left + w)));
-  let boxW, boxH;
-  if (sideSpace > headroom) {
-    smokeEl.dataset.origin = 'sides';
+  const cab = smokeCabinet;
+  const headroom = Math.max(0, cab.top);
+  const sideSpace = Math.max(0, Math.min(cab.left, vw - (cab.left + cab.w)));
+  const origin = sideSpace > headroom ? 'sides' : 'top';
+  smokeEl.dataset.origin = origin;
+  const unit = origin === 'sides' ? sideSpace * SMOKE_UNIT_OF_SIDE : headroom * SMOKE_UNIT_OF_BAND;
+  smokeUnit = Math.max(SMOKE_UNIT_MIN, Math.min(unit, cab.w * SMOKE_UNIT_MAX_OF_SET));
+  let boxLeft, boxW, boxH;
+  if (origin === 'sides') {
+    boxLeft = 0;
     boxW = vw;
-    boxH = top + h * SMOKE_SIDE_DEPTH;
-    smokeEl.style.left = '0px';
-    smokeEl.style.top = '0px';
+    boxH = Math.max(smokeUnit, cab.top + cab.h * SMOKE_SIDE_DEPTH);
   } else {
-    smokeEl.dataset.origin = 'top';
-    boxW = w;
-    boxH = headroom + h * SMOKE_BASE_OVERLAP;
-    smokeEl.style.left = left + 'px';
-    smokeEl.style.top = (top - headroom) + 'px';
+    boxLeft = Math.max(0, cab.left);
+    boxW = Math.max(1, Math.min(vw, cab.left + cab.w) - boxLeft);
+    boxH = headroom + smokeUnit * 0.5;
   }
+  smokeEl.style.left = boxLeft + 'px';
+  smokeEl.style.top = '0px';
   smokeEl.style.width = boxW + 'px';
   smokeEl.style.height = boxH + 'px';
+  smokeBox.left = boxLeft;
+  smokeBox.top = 0;
   smokeBox.w = Math.max(1, Math.round(boxW));
   smokeBox.h = Math.max(1, Math.round(boxH));
   if (smokeCanvas.width !== smokeBox.w) smokeCanvas.width = smokeBox.w;
   if (smokeCanvas.height !== smokeBox.h) smokeCanvas.height = smokeBox.h;
-  let unit;
-  if (smokeEl.dataset.origin === 'sides') {
-    unit = sideSpace * SMOKE_UNIT_OF_SIDE;
+  if (origin === 'sides') {
     const seamY = smokeBox.h * 0.94, seamH = smokeBox.h * 0.5;
     smokeEmitters = [
-      { x: left, y: seamY, w: seamH * 0.5, vx: -6 },
-      { x: left + w, y: seamY, w: seamH * 0.5, vx: 6 },
+      { x: cab.left - boxLeft, y: seamY, w: seamH * 0.5, vx: -6 },
+      { x: cab.left + cab.w - boxLeft, y: seamY, w: seamH * 0.5, vx: 6 },
     ];
   } else {
-    unit = boxH * SMOKE_UNIT_OF_BAND;
-    smokeEmitters = [{ x: smokeBox.w * 0.5, y: smokeBox.h * 0.96, w: smokeBox.w * 0.62, vx: 0 }];
+    smokeEmitters = [{ x: smokeBox.w * 0.5, y: headroom, w: smokeBox.w * 0.62, vx: 0 }];
   }
-  smokeUnit = Math.max(SMOKE_UNIT_MIN, Math.min(unit, w * SMOKE_UNIT_MAX_OF_SET));
+  smokeBuildMask();
   const level = Number(smokeEl.dataset.level);
   if (level > 0) { smokeParticles.length = 0; smokeStart(level); }
 }
@@ -1401,13 +1449,15 @@ const CROPS = {
     srcNight: 'https://images.squarespace-cdn.com/content/61fa20755a19de45b0fc3cb4/ab707f4d-b5d9-4ebd-afbc-a3f3c114c30c/moteltv-16x9-nightdark.png?content-type=image%2Fpng',
     srcDay: 'https://images.squarespace-cdn.com/content/61fa20755a19de45b0fc3cb4/52858276-3ce0-41f6-bc6b-bc26b3332671/moteltv-16x9.png?content-type=image%2Fpng',
     imgW: 1920, imgH: 1080,
-    win: { left: 545, top: 173, w: 830, h: 620 }
+    win: { left: 545, top: 173, w: 830, h: 620 },
+    cab: { left: 464, top: 101, w: 986, h: 840, r: 106 }
   },
   phone: {
     srcNight: 'https://images.squarespace-cdn.com/content/61fa20755a19de45b0fc3cb4/48a315f4-0332-45fe-aebc-3c82df44f6ae/moteltv-9x16-nightdark.png?content-type=image%2Fpng',
     srcDay: 'https://images.squarespace-cdn.com/content/61fa20755a19de45b0fc3cb4/2b2b1251-28c3-4c7d-9d73-fb9f275b8d87/moteltv-9x16.png?content-type=image%2Fpng',
     imgW: 1080, imgH: 1920,
-    win: { left: 115, top: 540, w: 850, h: 640 }
+    win: { left: 115, top: 540, w: 850, h: 640 },
+    cab: { left: 31, top: 468, w: 1014, h: 866, r: 106 }
   }
 };
 let dayMode = false;
@@ -1499,6 +1549,11 @@ function layout() {
   windowArea.style.top = (offsetY + crop.win.top * S) + 'px';
   windowArea.style.width = (crop.win.w * S) + 'px';
   windowArea.style.height = (crop.win.h * S) + 'px';
+  smokeCabinet.left = offsetX + crop.cab.left * S;
+  smokeCabinet.top = offsetY + crop.cab.top * S;
+  smokeCabinet.w = crop.cab.w * S;
+  smokeCabinet.h = crop.cab.h * S;
+  smokeCabinet.r = crop.cab.r * S;
   fitScreenFrame();
   const remoteScale = S * (isPortrait ? 1.2 : 0.75);
   remoteImg.style.width = (REMOTE_NATIVE.w * remoteScale) + 'px';
