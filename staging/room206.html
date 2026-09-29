@@ -1502,6 +1502,10 @@ const BUTTON_ZONES = {
   mute:        { x0: 195, x1: 330, y0: 248, y1: 345 },
   channelDown: { x0: 338, x1: 473, y0: 248, y1: 345 }
 };
+const REMOTE_MIN_BUTTON_PX = 44;
+const REMOTE_MIN_SCALE = REMOTE_MIN_BUTTON_PX / (BUTTON_ZONES.channelUp.y1 - BUTTON_ZONES.channelUp.y0);
+const REMOTE_SCREEN_GAP = 12;
+const REMOTE_EDGE_MIN = 12;
 function maxScaleForAxis(viewportSize, imgSize, winStart, winSize, pad) {
   const center = imgSize / 2;
   const kNear = winStart - center;
@@ -1564,10 +1568,22 @@ function layout() {
   smokeCabinet.h = crop.cab.h * S;
   smokeCabinet.r = crop.cab.r * S;
   fitScreenFrame();
-  const remoteScale = S * (isPortrait ? 1.2 : 0.75);
-  remoteImg.style.width = (REMOTE_NATIVE.w * remoteScale) + 'px';
-  remoteImg.style.height = (REMOTE_NATIVE.h * remoteScale) + 'px';
+  const remoteBaseScale = S * (isPortrait ? 1.2 : 0.75);
   const clearance = isPortrait ? PHONE_REMOTE_CLEARANCE : DESKTOP_REMOTE_CLEARANCE;
+  const screenRight = offsetX + (crop.win.left + crop.win.w) * S;
+  const screenBottom = offsetY + (crop.win.top + crop.win.h) * S;
+  let remoteScale = remoteBaseScale;
+  if (remoteBaseScale < REMOTE_MIN_SCALE) {
+    const fit = isPortrait
+      ? Math.min((vh - clearance - REMOTE_SCREEN_GAP - screenBottom) / REMOTE_BOTTOM_ROW_Y,
+                 (vw - 2 * REMOTE_EDGE_MIN) / REMOTE_NATIVE.w)
+      : (vw - REMOTE_EDGE_MIN - REMOTE_SCREEN_GAP - screenRight) / REMOTE_NATIVE.w;
+    remoteScale = Math.max(remoteBaseScale, Math.min(REMOTE_MIN_SCALE, fit));
+  }
+  const remoteLifted = remoteScale > remoteBaseScale;
+  const remoteW = REMOTE_NATIVE.w * remoteScale;
+  remoteImg.style.width = remoteW + 'px';
+  remoteImg.style.height = (REMOTE_NATIVE.h * remoteScale) + 'px';
   const hangPx = Math.max(0, remoteScale * (REMOTE_NATIVE.h - REMOTE_BOTTOM_ROW_Y) - clearance);
   remoteImg.style.bottom = (-hangPx) + 'px';
   if (isPortrait) {
@@ -1577,7 +1593,9 @@ function layout() {
   } else {
     remoteImg.style.left = '';
     remoteImg.style.transform = '';
-    remoteImg.style.right = '5%';
+    remoteImg.style.right = remoteLifted
+      ? Math.max(REMOTE_EDGE_MIN, Math.min(vw * 0.05, vw - screenRight - REMOTE_SCREEN_GAP - remoteW)) + 'px'
+      : '5%';
   }
   remotePressedImg.style.width = remoteImg.style.width;
   remotePressedImg.style.height = remoteImg.style.height;
