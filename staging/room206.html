@@ -948,6 +948,9 @@ function updateOffAir() {
   screenFrame.classList.toggle('offair', offAir && !poweredOff);
 }
 const SMOKE_SIDE_DEPTH = 0.38;
+const SMOKE_BOX_FOOT = 0.85;
+const SMOKE_VENT_WIDTH = 0.8;
+const SMOKE_VENT_SPEED = 34;
 const SMOKE_UNIT_OF_BAND = 0.65;
 const SMOKE_UNIT_OF_SIDE = 0.4;
 const SMOKE_UNIT_MIN = 26;
@@ -963,15 +966,16 @@ function syncSmokeGeometry() {
   smokeEl.dataset.origin = origin;
   const unit = origin === 'sides' ? sideSpace * SMOKE_UNIT_OF_SIDE : headroom * SMOKE_UNIT_OF_BAND;
   smokeUnit = Math.max(SMOKE_UNIT_MIN, Math.min(unit, cab.w * SMOKE_UNIT_MAX_OF_SET));
+  const emitterY = origin === 'sides' ? cab.top + cab.h * SMOKE_SIDE_DEPTH : headroom;
   let boxLeft, boxW, boxH;
   if (origin === 'sides') {
     boxLeft = 0;
     boxW = vw;
-    boxH = Math.max(smokeUnit, cab.top + cab.h * SMOKE_SIDE_DEPTH);
+    boxH = Math.max(smokeUnit, emitterY + smokeUnit * SMOKE_BOX_FOOT);
   } else {
     boxLeft = Math.max(0, cab.left);
     boxW = Math.max(1, Math.min(vw, cab.left + cab.w) - boxLeft);
-    boxH = headroom + smokeUnit * 0.5;
+    boxH = emitterY + smokeUnit * SMOKE_BOX_FOOT;
   }
   smokeEl.style.left = boxLeft + 'px';
   smokeEl.style.top = '0px';
@@ -984,13 +988,13 @@ function syncSmokeGeometry() {
   if (smokeCanvas.width !== smokeBox.w) smokeCanvas.width = smokeBox.w;
   if (smokeCanvas.height !== smokeBox.h) smokeCanvas.height = smokeBox.h;
   if (origin === 'sides') {
-    const seamY = smokeBox.h * 0.94, seamH = smokeBox.h * 0.5;
+    const vw_ = smokeUnit * SMOKE_VENT_WIDTH;
     smokeEmitters = [
-      { x: cab.left - boxLeft, y: seamY, w: seamH * 0.5, vx: -6 },
-      { x: cab.left + cab.w - boxLeft, y: seamY, w: seamH * 0.5, vx: 6 },
+      { x: cab.left - boxLeft, y: emitterY, w: vw_, vx: -SMOKE_VENT_SPEED },
+      { x: cab.left + cab.w - boxLeft, y: emitterY, w: vw_, vx: SMOKE_VENT_SPEED },
     ];
   } else {
-    smokeEmitters = [{ x: smokeBox.w * 0.5, y: headroom, w: smokeBox.w * 0.62, vx: 0 }];
+    smokeEmitters = [{ x: smokeBox.w * 0.5, y: emitterY, w: smokeBox.w * 0.62, vx: 0 }];
   }
   smokeBuildMask();
   const level = Number(smokeEl.dataset.level);
