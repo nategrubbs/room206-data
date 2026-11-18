@@ -3076,17 +3076,21 @@ function plugCable() {
   const r = screenFrame.getBoundingClientRect();
   cableEl.style.top = (r.bottom + CABLE_PLUGGED_TOP * cableScale) + 'px';
   cableEl.style.left = (r.right - CABLE_PLUGGED_RIGHT * cableScale - cableEl.offsetWidth) + 'px';
-  tryAirPlay();
+  tryCast();
 }
-function tryAirPlay() {
+function tryCast() {
   if (typeof video.webkitShowPlaybackTargetPicker === 'function') {
     try { video.webkitShowPlaybackTargetPicker(); } catch (e) {}
+    return;
+  }
+  if (video.remote && typeof video.remote.prompt === 'function') {
+    try { video.remote.prompt().catch(() => {}); } catch (e) {}
   }
 }
 castIconEl.addEventListener('click', e => {
   e.stopPropagation();
   onFirstInteraction();
-  tryAirPlay();
+  tryCast();
 });
 const FULLSCREEN_HIDE_ELS = [roomImg, roomImgFadeEl, remoteImg, remotePressedImg, cableEl, cableLineSvgEl, castIconEl, pullChainEl];
 function fsElement() {
