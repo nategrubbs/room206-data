@@ -3440,6 +3440,10 @@ dbgInit();
   if (HARVEST_ON) return;
   let booted = false;
   const BOOT_RACE_SIZE = 2;
+  const bootPreferred = CHANNELS.includes(SNO_CHANNEL) ? SNO_CHANNEL : null;
+  const raceChannels = (bootPreferred
+    ? [bootPreferred, ...CHANNELS.filter(c => c !== bootPreferred)]
+    : CHANNELS).slice(0, BOOT_RACE_SIZE);
   let raceOutstanding = BOOT_RACE_SIZE;
   let windowReleased = false;
   let dayModePrimed = false;
@@ -3459,7 +3463,9 @@ dbgInit();
   }
   function revealFirstReady(channels) {
     if (booted) return true;
-    const ch = channels.find(c => c && c.ready === true);
+    if (bootPreferred && bootPreferred.ready === undefined) return false;
+    const ch = (bootPreferred && bootPreferred.ready === true) ? bootPreferred
+      : channels.find(c => c && c.ready === true);
     if (!ch) return false;
     booted = true;
     bootReveal(CHANNELS.indexOf(ch)).then(releaseWindow);
@@ -3477,11 +3483,11 @@ dbgInit();
     loadChannel(ch, inRace ? IA_FOREGROUND : IA_BACKGROUND).then(() => {
       if (inRace) raceOutstanding--;
       if (ch.ready) warmChannel(ch);
-      if (revealFirstReady([ch])) return;
+      if (revealFirstReady(raceChannels)) return;
       if (inRace && raceOutstanding === 0) releaseWindow();
     });
   }
-  const startRace = () => CHANNELS.slice(0, BOOT_RACE_SIZE).forEach((ch, i) => loadOne(ch, i, true));
+  const startRace = () => raceChannels.forEach((ch, i) => loadOne(ch, i, true));
   const nightlyRefresh = fetchNightlyLists();
   if (seedNightlyFromCache()) startRace();
   else nightlyRefresh.then(startRace);
