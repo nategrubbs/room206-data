@@ -328,22 +328,24 @@
   #cast-icon:active { transform: scale(0.92); }
   #bingo-paper {
     --pw: 140px;
+    --bleed: 0px;
     --rot: -5deg;
     position: fixed;
     z-index: 19;
     display: block;
     box-sizing: border-box;
-    width: var(--pw);
-    padding: calc(var(--pw) * 0.07) calc(var(--pw) * 0.07) calc(var(--pw) * 0.085);
-    background-color: #f2ecdc;
-    background-image: linear-gradient(170deg, rgba(255,255,255,.35), rgba(0,0,0,.06) 60%, rgba(0,0,0,.13));
-    color: #2a2622;
+    overflow: hidden;
+    width: calc(var(--pw) + var(--bleed));
+    padding: calc(var(--pw) * 0.07) calc(var(--pw) * 0.07) calc(var(--pw) * 0.085) calc(var(--bleed) + var(--pw) * 0.07);
+    background-color: #E8E1D2;
+    background-image: linear-gradient(170deg, rgba(255,255,255,.18), rgba(0,0,0,.04) 60%, rgba(0,0,0,.10));
+    color: #16120F;
     border-radius: 1px;
     box-shadow: 0 10px 18px rgba(0,0,0,.55), 0 2px 4px rgba(0,0,0,.4);
     font-family: "Courier New", Courier, monospace;
     text-align: center;
     text-decoration: none;
-    filter: brightness(0.78) saturate(0.9);
+    filter: brightness(0.8) sepia(0.18);
     -webkit-tap-highlight-color: transparent;
     -webkit-user-drag: none;
     cursor: pointer;
@@ -354,7 +356,20 @@
     transform: translate(-25%, 70vh) rotate(-30deg);
     transition: transform 420ms cubic-bezier(.5, 0, .75, 0), opacity 260ms ease 160ms, visibility 0s linear 420ms;
   }
-  #bingo-paper.day { filter: brightness(0.93) saturate(0.95); }
+  #bingo-paper[data-slot="top"] {
+    transform-origin: 50% 0%;
+    transform: translate(-25%, -70vh) rotate(30deg);
+  }
+  #bingo-paper::before {
+    content: '';
+    position: absolute; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 120px 120px;
+    mix-blend-mode: multiply;
+    opacity: 0.38;
+    pointer-events: none;
+  }
+  #bingo-paper.day { filter: brightness(0.93) sepia(0.1); }
   #bingo-paper.shown {
     opacity: 1;
     visibility: visible;
@@ -362,6 +377,7 @@
     transform: rotate(var(--rot));
     transition: transform 750ms cubic-bezier(.2, .9, .3, 1.04) 250ms, opacity 200ms ease 250ms, visibility 0s linear 0s;
   }
+  #bingo-paper > span, #bingo-paper > img { position: relative; }
   #bingo-paper .bp-kicker { display: block; font-size: calc(var(--pw) * 0.077); letter-spacing: .12em; opacity: .75; }
   #bingo-paper .bp-title { display: block; font-weight: bold; font-size: calc(var(--pw) * 0.135); line-height: 1.05; letter-spacing: .02em; margin: calc(var(--pw) * 0.02) 0 calc(var(--pw) * 0.05); }
   #bingo-paper .bp-qr { display: block; width: 100%; aspect-ratio: 1; mix-blend-mode: multiply; -webkit-user-drag: none; }
@@ -370,8 +386,24 @@
   #bingo-paper[data-form="note"] .bp-qr,
   #bingo-paper[data-form="note"] .bp-scan { display: none; }
   #bingo-paper[data-form="note"] .bp-tap { display: block; }
+  #bingo-paper .bp-stamp {
+    position: absolute;
+    pointer-events: none;
+    mix-blend-mode: multiply;
+    opacity: .85;
+    width: calc(var(--pw) * 0.33); height: calc(var(--pw) * 0.33);
+    right: calc(var(--pw) * -0.093); top: calc(var(--pw) * -0.08);
+    transform: rotate(8deg);
+  }
+  #bingo-paper[data-form="note"] .bp-stamp {
+    width: calc(var(--pw) * 0.31); height: calc(var(--pw) * 0.31);
+    right: calc(var(--pw) * -0.0625); top: auto; bottom: calc(var(--pw) * -0.047);
+    transform: rotate(-6deg);
+  }
+  #bingo-paper .bp-stamp line { stroke: #C22B1C; stroke-linecap: round; stroke-width: 12; }
+  #bingo-paper .bp-stamp line + line { stroke-width: 11; }
   @media (prefers-reduced-motion: reduce) {
-    #bingo-paper, #bingo-paper.shown { transform: rotate(var(--rot)); }
+    #bingo-paper, #bingo-paper[data-slot="top"], #bingo-paper.shown { transform: rotate(var(--rot)); }
     #bingo-paper { transition: opacity 200ms ease, visibility 0s linear 200ms; }
     #bingo-paper.shown { transition: opacity 200ms ease, visibility 0s linear 0s; }
   }
@@ -462,6 +494,7 @@
       <img class="bp-qr" alt="" data-src="https://images.squarespace-cdn.com/content/v1/61fa20755a19de45b0fc3cb4/228490a8-eb7d-4046-94a0-4eabb0b6605b/holiday-qr-code.png?format=300w">
       <span class="bp-note bp-scan">scan for your card</span>
       <span class="bp-note bp-tap">tap for your card &rarr;</span>
+      <svg class="bp-stamp" viewBox="0 0 100 100" aria-hidden="true"><line x1="14" y1="12" x2="88" y2="90"/><line x1="86" y1="10" x2="12" y2="86"/></svg>
     </a>
     <img id="fullscreen-icon" alt="Fullscreen" src="https://images.squarespace-cdn.com/content/61fa20755a19de45b0fc3cb4/b8cd819d-49c9-4369-bea9-ddae3f2479ec/fullscreen-icon.png?content-type=image%2Fpng">
     <div id="fullscreen-exit-icon" role="button" aria-label="Exit fullscreen" tabindex="0">
@@ -1719,47 +1752,43 @@ function layout() {
     fullscreenIconEl.style.left = r.left + 'px';
   }
   syncSmokeGeometry();
-  bingoScale = { S, offsetX, offsetY, isPortrait };
+  bingoScale = { S, offsetY, isPortrait };
   syncBingoPaper();
 }
-const BINGO_PAPER_DESKTOP = { right: 452, bottom: 862, minW: 100, maxW: 150 };
-const BINGO_PAPER_PHONE = { left: 93, top: 1550, minW: 110, maxW: 140, vwShare: 0.32 };
-const BINGO_PAPER_MARGIN = 12;
+const BINGO_PAPER_TABLE = { bottom: 873, bleed: 45, rot: -6, minW: 100, maxW: 150, noteMaxW: 140, gap: 16 };
+const BINGO_PAPER_TOP = { bleed: 40, rot: -7, minW: 110, maxW: 140, vwShare: 0.30, onCab: 16 };
+const BINGO_PAPER_MARGIN = 4;
 let bingoScale = null;
 function syncBingoPaper() {
   const ch = CHANNELS[activeIndex];
   const url = ch && ch.bingoUrl;
   let fits = false;
   if (url && !fullscreenActive && bingoScale) {
-    const { S, offsetX, offsetY, isPortrait } = bingoScale;
+    const { S, offsetY, isPortrait } = bingoScale;
     const vw = window.innerWidth;
     let coarse = false;
     try { coarse = window.matchMedia('(pointer: coarse)').matches; } catch (e) {}
     const form = (isPortrait || coarse) ? 'note' : 'qr';
-    let pw, left, top;
+    const slot = isPortrait ? 'top' : 'table';
+    const p = isPortrait ? BINGO_PAPER_TOP : BINGO_PAPER_TABLE;
+    let pw;
     if (isPortrait) {
-      const p = BINGO_PAPER_PHONE;
       pw = Math.max(p.minW, Math.min(p.maxW, vw * p.vwShare));
-      left = offsetX + p.left * S;
-      top = offsetY + p.top * S;
     } else {
-      const p = BINGO_PAPER_DESKTOP;
-      const right = offsetX + p.right * S;
-      pw = Math.min(form === 'note' ? BINGO_PAPER_PHONE.maxW : p.maxW, right - BINGO_PAPER_MARGIN);
-      left = right - pw;
-      top = null;
+      pw = Math.min(form === 'note' ? p.noteMaxW : p.maxW, smokeCabinet.left - p.gap);
       if (pw < p.minW) pw = 0;
     }
     if (pw > 0) {
       bingoPaperEl.dataset.form = form;
+      bingoPaperEl.dataset.slot = slot;
       bingoPaperEl.style.setProperty('--pw', pw + 'px');
+      bingoPaperEl.style.setProperty('--bleed', p.bleed + 'px');
+      bingoPaperEl.style.setProperty('--rot', p.rot + 'deg');
       const h = bingoPaperEl.offsetHeight;
-      if (top === null) top = offsetY + BINGO_PAPER_DESKTOP.bottom * S - h;
-      const floor = isPortrait
-        ? remoteImg.getBoundingClientRect().top - BINGO_PAPER_MARGIN
-        : window.innerHeight - BINGO_PAPER_MARGIN;
-      fits = left >= BINGO_PAPER_MARGIN && top >= BINGO_PAPER_MARGIN && top + h <= floor;
-      bingoPaperEl.style.left = left + 'px';
+      const bottom = isPortrait ? smokeCabinet.top + p.onCab : offsetY + p.bottom * S;
+      const top = bottom - h;
+      fits = top >= BINGO_PAPER_MARGIN && bottom <= window.innerHeight - BINGO_PAPER_MARGIN;
+      bingoPaperEl.style.left = (-p.bleed) + 'px';
       bingoPaperEl.style.top = top + 'px';
     }
   }
