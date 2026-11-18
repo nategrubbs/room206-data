@@ -488,10 +488,10 @@
     <svg id="cable-line"><path id="cable-line-path" fill="none" stroke="#000" stroke-linecap="round"/></svg>
     <img id="cable" alt="" src="https://images.squarespace-cdn.com/content/61fa20755a19de45b0fc3cb4/e932fa79-5865-4be4-b877-01a1dd6c0f71/TVcables-dark.png?content-type=image%2Fpng">
     <img id="cast-icon" alt="Cast" src="https://images.squarespace-cdn.com/content/61fa20755a19de45b0fc3cb4/f8a7c9d5-f55b-49f4-8914-6039bf17c773/mobile-cast-icon.png?content-type=image%2Fpng">
-    <a id="bingo-paper" target="_blank" rel="noopener" data-form="qr" aria-label="Play Holiday Bingo (opens in a new tab)">
+    <a id="bingo-paper" target="_blank" rel="noopener" data-form="qr">
       <span class="bp-kicker">PLAY ALONG</span>
-      <span class="bp-title">HOLIDAY<br>BINGO</span>
-      <img class="bp-qr" alt="" data-src="https://images.squarespace-cdn.com/content/v1/61fa20755a19de45b0fc3cb4/228490a8-eb7d-4046-94a0-4eabb0b6605b/holiday-qr-code.png?format=300w">
+      <span class="bp-title"><span class="bp-name"></span><br>BINGO</span>
+      <img class="bp-qr" alt="">
       <span class="bp-note bp-scan">scan for your card</span>
       <span class="bp-note bp-tap">tap for your card &rarr;</span>
       <svg class="bp-stamp" viewBox="0 0 100 100" aria-hidden="true"><line x1="14" y1="12" x2="88" y2="90"/><line x1="86" y1="10" x2="12" y2="86"/></svg>
@@ -538,7 +538,11 @@ const SNO_CHANNEL = {
   balancedQueries: [SNO_ROMANCE, SNO_TV_MOVIES],
   fallback: SNO_ROMANCE,
   familySafe: true,
-  bingoUrl: 'https://www.nategrubbs.com/bingo/holiday'
+  bingo: {
+    name: 'Holiday',
+    url: 'https://www.nategrubbs.com/bingo/holiday',
+    qr: 'https://images.squarespace-cdn.com/content/v1/61fa20755a19de45b0fc3cb4/228490a8-eb7d-4046-94a0-4eabb0b6605b/holiday-qr-code.png?format=300w'
+  }
 };
 function snoInSeason(d = new Date()) {
   const m = d.getMonth() + 1;
@@ -550,6 +554,11 @@ function withSeasonalChannels(lineup) {
   lineup.splice(i === -1 ? lineup.length : i, 0, SNO_CHANNEL);
   return lineup;
 }
+const BMOVIE_BINGO = {
+  name: 'B-Movie',
+  url: 'https://www.nategrubbs.com/bingo',
+  qr: 'https://images.squarespace-cdn.com/content/v1/61fa20755a19de45b0fc3cb4/c4fb0a80-95a3-4724-b115-1a4a928e9817/bingo-qr-code.png?format=300w'
+};
 const CHANNELS_LATE_NIGHT = withSeasonalChannels([
   { name: 'nineties',   prefix: 'JAMZ',  network: 'JAMZ 90s TV', number: 4,  queries: ['collection:(feature_films) AND mediatype:(movies) AND year:[1990 TO 1999] AND (language:(English OR eng) OR (*:* AND -language:[* TO *]))'], fallback: eraFallback('1990 TO 1999') },
   { name: 'y2k',        prefix: 'Y2K',   network: 'Y2K NET', number: 9,  queries: ['collection:(feature_films) AND mediatype:(movies) AND year:[2000 TO 2009] AND (language:(English OR eng) OR (*:* AND -language:[* TO *]))'], fallback: eraFallback('2000 TO 2009') },
@@ -573,8 +582,9 @@ const CHANNELS_LATE_NIGHT = withSeasonalChannels([
     BMOVIE_SCHLOCK
   ],
   balancedWeights: [2, 2, 1],
-  fallback: BMOVIE_SCHLOCK },
-  { name: 'grindhouse', prefix: 'GRND',  network: 'GRINDHOUSE CINEMA', number: 58, queries: ['collection:(feature_films) AND mediatype:(movies) AND language:(English OR eng) AND subject:(grindhouse OR exploitation OR "drive-in")', 'collection:(feature_films) AND mediatype:(movies) AND language:(English OR eng) AND subject:(exploitation)'] },
+  fallback: BMOVIE_SCHLOCK,
+  bingo: BMOVIE_BINGO },
+  { name: 'grindhouse', prefix: 'GRND',  network: 'GRINDHOUSE CINEMA', number: 58, queries: ['collection:(feature_films) AND mediatype:(movies) AND language:(English OR eng) AND subject:(grindhouse OR exploitation OR "drive-in")', 'collection:(feature_films) AND mediatype:(movies) AND language:(English OR eng) AND subject:(exploitation)'], bingo: BMOVIE_BINGO },
   { name: 'nonenglish', prefix: 'INTL',  network: 'INTERNATIONAL CINEMA', number: 72, queries: ['collection:(feature_films) AND mediatype:(movies) AND -language:(English) AND -language:(eng) AND language:(*) AND -year:[2010 TO 9999]'] }
 ]);
 const PBS_BIG_FOUR = 'title:("Rainbow Quest") OR title:(Flambards) OR title:("Steven Banks") OR title:("Club Connect")';
@@ -1761,9 +1771,15 @@ const BINGO_PAPER_MARGIN = 4;
 let bingoScale = null;
 function syncBingoPaper() {
   const ch = CHANNELS[activeIndex];
-  const url = ch && ch.bingoUrl;
+  const bingo = ch && ch.bingo;
+  const url = bingo && bingo.url;
   let fits = false;
   if (url && !fullscreenActive && bingoScale) {
+    if (bingoPaperEl.getAttribute('href') !== url) {
+      bingoPaperEl.setAttribute('href', url);
+      bingoPaperEl.setAttribute('aria-label', `Play ${bingo.name} Bingo (opens in a new tab)`);
+      bingoPaperEl.querySelector('.bp-name').textContent = bingo.name.toUpperCase();
+    }
     const { S, offsetY, isPortrait } = bingoScale;
     const vw = window.innerWidth;
     let coarse = false;
@@ -1794,9 +1810,8 @@ function syncBingoPaper() {
   }
   const show = fits && !poweredOff;
   if (show) {
-    if (bingoPaperEl.getAttribute('href') !== url) bingoPaperEl.setAttribute('href', url);
     const qr = bingoPaperEl.querySelector('.bp-qr');
-    if (bingoPaperEl.dataset.form === 'qr' && !qr.getAttribute('src')) qr.setAttribute('src', qr.dataset.src);
+    if (bingoPaperEl.dataset.form === 'qr' && qr.getAttribute('src') !== bingo.qr) qr.setAttribute('src', bingo.qr);
   }
   bingoPaperEl.classList.toggle('day', dayMode);
   bingoPaperEl.classList.toggle('shown', show);
