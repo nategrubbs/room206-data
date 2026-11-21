@@ -462,6 +462,64 @@
     100% { transform: scaleY(1); }
   }
   #pull-chain.snapping { animation: pull-chain-snap 480ms cubic-bezier(.36,.07,.19,.97); }
+  #chain-tag {
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    pointer-events: none;
+  }
+  #chain-tag .ct-ring {
+    width: 7px; height: 7px;
+    margin-top: -1px;
+    box-sizing: border-box;
+    border: 1.5px solid #8a8378;
+    border-radius: 50%;
+  }
+  #chain-tag .ct-disc {
+    position: relative;
+    width: 34px; height: 34px;
+    margin-top: -2px;
+    border-radius: 50%;
+    overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    background: #E8E1D2;
+    box-shadow: 0 1.5px 0 #b3a891, 0 2.5px 0 #8c826f, inset 0 1px 0 rgba(255,255,255,.5);
+    font-family: "Courier New", Courier, monospace;
+    font-weight: bold;
+    font-size: 12px;
+    filter: brightness(0.8) sepia(0.18);
+  }
+  #chain-tag.day .ct-disc { filter: brightness(0.93) sepia(0.1); }
+  #chain-tag .ct-disc::before {
+    content: '';
+    position: absolute; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 120px 120px;
+    mix-blend-mode: multiply;
+    opacity: 0.38;
+  }
+  #chain-tag .ct-rim {
+    position: absolute;
+    inset: 3px 4px 4px 3px;
+    border-style: solid;
+    border-color: #C22B1C;
+    border-width: 1.4px 1.9px 1.7px 1.3px;
+    border-radius: 50%;
+    transform: rotate(-14deg);
+    opacity: .78;
+    mix-blend-mode: multiply;
+  }
+  #chain-tag .ct-label {
+    position: relative;
+    color: #C22B1C;
+    transform: rotate(-6deg);
+    opacity: .82;
+    mix-blend-mode: multiply;
+  }
 </style>
 </head>
 <body>
@@ -502,10 +560,12 @@
         <path d="M4 9V4h5"/><path d="M20 9V4h-5"/><path d="M4 15v5h5"/><path d="M20 15v5h-5"/>
       </svg>
     </div>
-    <div id="pull-chain" role="button" aria-label="Toggle day/night" tabindex="0">
+    <div id="pull-chain" role="button" aria-label="Switch to Saturday Morning (AM)" tabindex="0">
       <div class="chain-seg" id="chain-seg-0">
         <div class="chain-seg" id="chain-seg-1">
-          <div class="chain-seg" id="chain-seg-2"></div>
+          <div class="chain-seg" id="chain-seg-2">
+            <div id="chain-tag" aria-hidden="true"><div class="ct-ring"></div><div class="ct-disc"><i class="ct-rim"></i><span class="ct-label">AM</span></div></div>
+          </div>
         </div>
       </div>
     </div>
@@ -3196,8 +3256,16 @@ document.addEventListener('click', e => {
 }, true);
 const ROOM_CROSSFADE_MS = 1500;
 let roomCrossfadeTimer = null;
+function syncChainTag() {
+  const tag = document.getElementById('chain-tag');
+  tag.querySelector('.ct-label').textContent = dayMode ? 'PM' : 'AM';
+  tag.classList.toggle('day', dayMode);
+  document.getElementById('pull-chain').setAttribute('aria-label',
+    dayMode ? 'Switch to Late Night (PM)' : 'Switch to Saturday Morning (AM)');
+}
 function toggleDayNightMode() {
   dayMode = !dayMode;
+  syncChainTag();
   const isPortrait = window.matchMedia('(orientation: portrait)').matches;
   const crop = (isPortrait && CROPS.phone.win) ? CROPS.phone : CROPS.desktop;
   const newSrc = currentRoomSrc(crop);
