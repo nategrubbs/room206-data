@@ -620,10 +620,15 @@ const BMOVIE_BINGO = {
   url: 'https://www.nategrubbs.com/bingo',
   qr: 'https://images.squarespace-cdn.com/content/v1/61fa20755a19de45b0fc3cb4/c4fb0a80-95a3-4724-b115-1a4a928e9817/bingo-qr-code.png?format=300w'
 };
+const SOFTCORE_WEIGHT = 0.35;
+const SOFTCORE_TELLS = '(title:(bikini OR bikinis OR seduce OR seduced OR seductress OR temptress OR vixen OR vixens OR sex OR sexy OR sexboat OR lust OR lusty OR erotic OR erotica OR sensual OR playmate OR playmates OR centerfold OR "in heat" OR "cave girl" OR "pamela principle" OR "target of seduction" OR "victim of desire" OR "wager of love")'
+  + ' OR subject:(cinemax OR playboy OR breasts OR topless OR softcore OR "soft core" OR "erotic thriller" OR sexploitation OR "sex comedy" OR striptease OR lingerie'
+  + ' OR "Shannon Tweed" OR "Julie Strain" OR "Jacqueline Lovell" OR "Tane McClure" OR "Monique Parent" OR "Amber Newman" OR "Rhonda Shear" OR "Kim Dawson" OR "Gabriella Hall" OR "Kira Reed" OR "Melissa Moore" OR "Tammy Stones" OR "Lina Romay" OR "Jess Franco"))'
+  + ' AND -subject:(documentary)';
 const CHANNELS_LATE_NIGHT = withSeasonalChannels([
-  { name: 'nineties',   prefix: 'JAMZ',  network: 'JAMZ 90s TV', number: 4,  queries: ['collection:(feature_films) AND mediatype:(movies) AND year:[1990 TO 1999] AND (language:(English OR eng) OR (*:* AND -language:[* TO *]))'], fallback: eraFallback('1990 TO 1999') },
-  { name: 'y2k',        prefix: 'Y2K',   network: 'Y2K NET', number: 9,  queries: ['collection:(feature_films) AND mediatype:(movies) AND year:[2000 TO 2009] AND (language:(English OR eng) OR (*:* AND -language:[* TO *]))'], fallback: eraFallback('2000 TO 2009') },
-  { name: 'eighties',   prefix: 'RAD',   network: 'RAD 80s TV', number: 13, queries: ['collection:(feature_films) AND mediatype:(movies) AND year:[1980 TO 1989] AND (language:(English OR eng) OR (*:* AND -language:[* TO *]))'], fallback: eraFallback('1980 TO 1989') },
+  { name: 'nineties',   prefix: 'JAMZ',  network: 'JAMZ 90s TV', number: 4,  queries: ['collection:(feature_films) AND mediatype:(movies) AND year:[1990 TO 1999] AND (language:(English OR eng) OR (*:* AND -language:[* TO *]))'], fallback: eraFallback('1990 TO 1999'), softcoreDownweight: true },
+  { name: 'y2k',        prefix: 'Y2K',   network: 'Y2K NET', number: 9,  queries: ['collection:(feature_films) AND mediatype:(movies) AND year:[2000 TO 2009] AND (language:(English OR eng) OR (*:* AND -language:[* TO *]))'], fallback: eraFallback('2000 TO 2009'), softcoreDownweight: true },
+  { name: 'eighties',   prefix: 'RAD',   network: 'RAD 80s TV', number: 13, queries: ['collection:(feature_films) AND mediatype:(movies) AND year:[1980 TO 1989] AND (language:(English OR eng) OR (*:* AND -language:[* TO *]))'], fallback: eraFallback('1980 TO 1989'), softcoreDownweight: true },
   { name: 'tvshows',    prefix: 'RERUN', network: 'RERUN CLASSIC TV', number: 22, queries: ['collection:(classic_tv) AND mediatype:(movies) AND (language:(English OR eng) OR (*:* AND -language:[* TO *]))', 'mediatype:(movies) AND subject:(television series) AND (language:(English OR eng) OR (*:* AND -language:[* TO *]))'], fallback: FALLBACK_CLASSIC_TV },
   {
     name: 'cartoons', prefix: 'TOON', network: 'TOON TIME', number: 27,
@@ -1915,7 +1920,7 @@ function shuffle(arr) {
   }
   return a;
 }
-const SAFE_CONTENT_FILTER = 'AND -subject:(adult OR pornographic OR erotic OR hentai OR xxx OR nudity OR fetish) AND -subject:("video essay" OR "media criticism")';
+const SAFE_CONTENT_FILTER = 'AND -subject:(adult OR pornographic OR erotic OR erotica OR hentai OR xxx OR nudity OR fetish) AND -subject:("video essay" OR "media criticism")';
 const IA_FETCH_TIMEOUT_MS = 6000;
 const IA_MAX_RETRIES = 1;
 const IA_META_TIMEOUT_MS = 2500;
@@ -2316,6 +2321,14 @@ async function harvestChannel(channelOrName, targetCount = HARVEST_POOL_SIZE) {
     ? [() => searchBalancedPool(ch.balancedQueries.map(q => q + safety), 200, IA_BACKGROUND, ch.balancedWeights)]
     : ch.queries.map(q => () => searchPool(q + safety, 200));
   getPools.push(() => searchPool(fallback + safety, 200));
+  const softcore = new Set();
+  if (ch.softcoreDownweight) {
+    const qs = [...(ch.balancedQueries || ch.queries), fallback];
+    for (const q of qs) {
+      try { for (const id of await searchPool(`${q}${safety} AND ${SOFTCORE_TELLS}`, 500)) softcore.add(id); }
+      catch (e) { console.warn(`[harvest] ${ch.name}: softcore search failed — full weight tonight`); }
+    }
+  }
   const found = new Map();
   for (const getPool of getPools) {
     if (found.size >= targetCount) break;
@@ -2326,7 +2339,8 @@ async function harvestChannel(channelOrName, targetCount = HARVEST_POOL_SIZE) {
       if (found.has(id)) continue;
       const pick = await checkCandidate(id, minDuration);
       if (pick) {
-        found.set(id, { identifier: pick.identifier, file: pick.file, title: pick.title, year: pick.year, duration: pick.duration, weight: 1 });
+        const weight = softcore.has(id) ? SOFTCORE_WEIGHT : 1;
+        found.set(id, { identifier: pick.identifier, file: pick.file, title: pick.title, year: pick.year, duration: pick.duration, weight });
         console.log(`[harvest] ${ch.name}: ${found.size}/${targetCount} — ${pick.title}`);
       }
       await wait(HARVEST_PACE_MS);
