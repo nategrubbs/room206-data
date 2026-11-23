@@ -58,6 +58,20 @@
     pointer-events: none;
     -webkit-user-drag: none;
   }
+  #tv-badge {
+    position: absolute;
+    z-index: 13;
+    display: none;
+    align-items: flex-start;
+    justify-content: center;
+    color: #d8c4a4;
+    opacity: 0.3;
+    filter: blur(0.4px);
+    transition: color 1500ms linear, opacity 1500ms linear;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #tv-badge.day { opacity: 0.35; }
+  #tv-badge > svg { display: block; }
   #roomImgFade {
     position: absolute;
     z-index: 11;
@@ -540,6 +554,9 @@
     </div>
     <img id="roomImg" alt="">
     <img id="roomImgFade" alt="">
+    <a id="tv-badge" href="https://nategrubbs.com" target="_blank" rel="noopener noreferrer" aria-label="nategrubbs.com (opens in a new tab)">
+      <svg viewBox="146 196 320 400" aria-hidden="true"><path fill="currentColor" d="M146.096 491.218 L146.004 196 L465.904 196 L465.996 491.201 C466.001 505.902 457.941 519.421 445.006 526.407 L325.064 591.194 C313.2 597.602 298.907 597.602 287.044 591.194 L167.086 526.399 C154.159 519.417 146.101 505.91 146.096 491.218 Z M313.39 284.601 C290.664 284.601 269.68 298.237 262.337 316.772 L262.337 288.796 L241.008 288.796 L241.008 384.861 L262.337 384.861 L262.337 349.644 C262.337 320.267 283.666 301.385 307.798 301.385 C333.672 301.385 347.663 318.87 347.663 345.795 L347.663 384.861 L368.992 384.861 L368.992 346.496 C368.992 310.125 352.558 284.601 313.39 284.601 Z M241.008 406.164 L241.008 413.376 C241.008 449.746 257.442 475.27 296.61 475.27 C319.336 475.27 340.32 461.635 347.663 443.099 L347.663 471.076 L368.992 471.076 L368.992 427.493 L368.992 406.164 L347.663 406.164 L304.08 406.164 L304.08 427.493 L344.928 427.493 C338.437 446.79 321.191 458.486 302.202 458.486 C276.328 458.486 262.337 441.002 262.337 414.077 L262.337 406.164 Z"/></svg>
+    </a>
     <div id="smoke" data-level="0" data-origin="top" aria-hidden="true"><canvas></canvas></div>
     <img id="remote" alt="" src="https://images.squarespace-cdn.com/content/61fa20755a19de45b0fc3cb4/7c6ecc4f-1379-4327-908d-325013c8f5fb/TVremote.png?content-type=image%2Fpng">
     <img id="remote-pressed" alt="" src="https://images.squarespace-cdn.com/content/61fa20755a19de45b0fc3cb4/6574702e-3289-4c4b-a549-a58f6d2c911e/TVremote-pressed.png?content-type=image%2Fpng">
@@ -1196,6 +1213,7 @@ const castIconEl = document.getElementById('cast-icon');
 const fullscreenIconEl = document.getElementById('fullscreen-icon');
 const fullscreenExitIconEl = document.getElementById('fullscreen-exit-icon');
 const tvWrapperEl = document.getElementById('tv-wrapper');
+const tvBadgeEl = document.getElementById('tv-badge');
 const pullChainEl = document.getElementById('pull-chain');
 const chainSegEls = [
   document.getElementById('chain-seg-0'),
@@ -1655,6 +1673,12 @@ const CROPS = {
     cab: { left: 31, top: 468, w: 1014, h: 866, r: 106 }
   }
 };
+const BADGE_SPOTS = {
+  desktop: { cx: 957, cy: 839, w: 32, lip: 808, seam: 870 },
+  phone:   { cx: 538, cy: 1230, w: 32, lip: 1198, seam: 1262 }
+};
+const BADGE_ASPECT = 400 / 320;
+const TV_BADGE_MIN_HIT_PX = 44;
 let dayMode = false;
 function currentRoomSrc(crop) { return dayMode ? crop.srcDay : crop.srcNight; }
 const PAD = 60;
@@ -1713,6 +1737,7 @@ function layout() {
     fitScreenFrame();
     const r = screenFrame.getBoundingClientRect();
     fullscreenIconEl.style.display = 'none';
+    tvBadgeEl.style.display = 'none';
     fullscreenExitIconEl.style.display = 'block';
     const fsIconW = Math.max(36, Math.min(64, r.width * 0.07)) * 0.5;
     fullscreenExitIconEl.style.width = fsIconW + 'px';
@@ -1754,6 +1779,22 @@ function layout() {
   smokeCabinet.w = crop.cab.w * S;
   smokeCabinet.h = crop.cab.h * S;
   smokeCabinet.r = crop.cab.r * S;
+  const spot = (crop === CROPS.phone) ? BADGE_SPOTS.phone : BADGE_SPOTS.desktop;
+  const markW = spot.w * S, markH = markW * BADGE_ASPECT;
+  const badgePad = Math.max(0, (TV_BADGE_MIN_HIT_PX - markW) / 2);
+  const markTop = offsetY + spot.cy * S - markH / 2;
+  const winBottom = offsetY + (crop.win.top + crop.win.h) * S;
+  const badgeTop = Math.max(markTop - badgePad, winBottom);
+  tvBadgeEl.style.display = 'flex';
+  tvBadgeEl.style.width = (markW + badgePad * 2) + 'px';
+  tvBadgeEl.style.height = (markH + badgePad * 2) + 'px';
+  tvBadgeEl.style.left = (offsetX + spot.cx * S - markW / 2 - badgePad) + 'px';
+  tvBadgeEl.style.top = badgeTop + 'px';
+  const badgeSvg = tvBadgeEl.firstElementChild;
+  badgeSvg.style.width = markW + 'px';
+  badgeSvg.style.height = markH + 'px';
+  badgeSvg.style.marginTop = (markTop - badgeTop) + 'px';
+  syncBadgeMode();
   fitScreenFrame();
   const remoteBaseScale = S * (isPortrait ? 1.2 : 0.75);
   const clearance = isPortrait ? PHONE_REMOTE_CLEARANCE : DESKTOP_REMOTE_CLEARANCE;
@@ -3277,9 +3318,11 @@ function syncChainTag() {
   document.getElementById('pull-chain').setAttribute('aria-label',
     dayMode ? 'Switch to Late Night (PM)' : 'Switch to Saturday Morning (AM)');
 }
+function syncBadgeMode() { tvBadgeEl.classList.toggle('day', dayMode); }
 function toggleDayNightMode() {
   dayMode = !dayMode;
   syncChainTag();
+  syncBadgeMode();
   const isPortrait = window.matchMedia('(orientation: portrait)').matches;
   const crop = (isPortrait && CROPS.phone.win) ? CROPS.phone : CROPS.desktop;
   const newSrc = currentRoomSrc(crop);
