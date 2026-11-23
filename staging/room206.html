@@ -650,6 +650,7 @@ const BMOVIE_BINGO = {
   qr: 'https://images.squarespace-cdn.com/content/v1/61fa20755a19de45b0fc3cb4/c4fb0a80-95a3-4724-b115-1a4a928e9817/bingo-qr-code.png?format=300w'
 };
 const SOFTCORE_WEIGHT = 0.2;
+const SOFTCORE_MAX_SHARE = 0.2;
 const SOFTCORE_TELLS = '(title:(bikini OR bikinis OR seduce OR seduced OR seductress OR temptress OR vixen OR vixens OR sex OR sexy OR sexboat OR lust OR lusty OR erotic OR erotica OR sensual OR playmate OR playmates OR centerfold OR "in heat" OR "cave girl" OR "pamela principle" OR "target of seduction" OR "victim of desire" OR "wager of love")'
   + ' OR subject:(cinemax OR playboy OR breasts OR topless OR softcore OR "soft core" OR "erotic thriller" OR sexploitation OR "sex comedy" OR striptease OR lingerie'
   + ' OR "Shannon Tweed" OR "Julie Strain" OR "Jacqueline Lovell" OR "Tane McClure" OR "Monique Parent" OR "Amber Newman" OR "Rhonda Shear" OR "Kim Dawson" OR "Gabriella Hall" OR "Kira Reed" OR "Melissa Moore" OR "Tammy Stones" OR "Lina Romay" OR "Jess Franco"))'
@@ -2382,6 +2383,8 @@ async function harvestChannel(channelOrName, targetCount = HARVEST_POOL_SIZE) {
       catch (e) { console.warn(`[harvest] ${ch.name}: softcore search failed — full weight tonight`); }
     }
   }
+  const softcoreCap = Math.ceil(targetCount * SOFTCORE_MAX_SHARE);
+  let flaggedCount = 0;
   const found = new Map();
   for (const getPool of getPools) {
     if (found.size >= targetCount) break;
@@ -2390,9 +2393,11 @@ async function harvestChannel(channelOrName, targetCount = HARVEST_POOL_SIZE) {
     for (const id of shuffle(pool)) {
       if (found.size >= targetCount) break;
       if (found.has(id)) continue;
+      if (softcore.has(id) && flaggedCount >= softcoreCap) continue;
       const pick = await checkCandidate(id, minDuration);
       if (pick) {
         const weight = softcore.has(id) ? SOFTCORE_WEIGHT : 1;
+        if (softcore.has(id)) flaggedCount++;
         found.set(id, { identifier: pick.identifier, file: pick.file, title: pick.title, year: pick.year, duration: pick.duration, weight });
         console.log(`[harvest] ${ch.name}: ${found.size}/${targetCount} — ${pick.title}`);
       }
