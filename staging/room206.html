@@ -1975,6 +1975,7 @@ function shuffle(arr) {
   return a;
 }
 const SAFE_CONTENT_FILTER = 'AND -subject:(adult OR pornographic OR erotic OR erotica OR hentai OR xxx OR nudity OR fetish) AND -subject:("video essay" OR "media criticism")';
+const BLOCKED_TITLES_FILTER = 'AND -title:("love camp 7" OR "goodbye uncle tom" OR "addio zio tom" OR "men behind the sun" OR nekromantik)';
 const IA_FETCH_TIMEOUT_MS = 6000;
 const IA_MAX_RETRIES = 1;
 const IA_META_TIMEOUT_MS = 2500;
@@ -2192,7 +2193,7 @@ async function searchPool(query, rows = 50, priority = IA_BACKGROUND) {
   const cacheKey = `ia_pool_${query}_r${rows}`;
   const cached = iaCacheGet(cacheKey);
   if (cached) { dbgCacheHit('search', priority, query, cached.length); return cached; }
-  const url = `https://archive.org/advancedsearch.php?q=${encodeURIComponent(query + ' ' + SAFE_CONTENT_FILTER)}&fl[]=identifier&rows=${rows}&page=1&output=json`;
+  const url = `https://archive.org/advancedsearch.php?q=${encodeURIComponent(query + ' ' + SAFE_CONTENT_FILTER + ' ' + BLOCKED_TITLES_FILTER)}&fl[]=identifier&rows=${rows}&page=1&output=json`;
   const res = await fetchWithRetry(url, { priority, kind: 'search', label: query.slice(0, 48) });
   const data = await res.json();
   const pool = ((data.response && data.response.docs) || []).map(d => d.identifier).filter(Boolean);
