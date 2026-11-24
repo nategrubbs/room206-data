@@ -1975,7 +1975,25 @@ function shuffle(arr) {
   return a;
 }
 const SAFE_CONTENT_FILTER = 'AND -subject:(adult OR pornographic OR erotic OR erotica OR hentai OR xxx OR nudity OR fetish) AND -subject:("video essay" OR "media criticism")';
-const BLOCKED_TITLES_FILTER = 'AND -title:("love camp 7" OR "goodbye uncle tom" OR "addio zio tom" OR "men behind the sun" OR nekromantik)';
+const IA_MAX_QUERY_CHARS = 2042;
+const BLOCKED_TITLES = [
+  'love camp 7', 'goodbye uncle tom', 'addio zio tom', 'men behind the sun', 'nekromantik',
+  'cannibal holocaust', 'killing of america',
+  'zuendel', 'zundel', 'zündel', 'another voice of freedom', 'holohoax', 'wahrheit über den holocaust',
+  'all this and rabbit stew', 'jungle jitters', 'hallelujah land', 'scrub me mama',
+  'mad bull 34', 'schizophreniac',
+];
+const BLOCKED_TAGS = ['zuendel', 'zundel', 'zündel', 'holohoax'];
+const blockedPattern = list => new RegExp('(^|[^\\p{L}\\p{N}])(' + list.map(p =>
+  p.split(' ').map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[^\\p{L}\\p{N}]+')).join('|') + ')($|[^\\p{L}\\p{N}])', 'iu');
+const BLOCKED_TITLE_RE = blockedPattern(BLOCKED_TITLES);
+const BLOCKED_TAG_RE = blockedPattern(BLOCKED_TAGS);
+function isBlockedDoc(d) {
+  const text = v => Array.isArray(v) ? v.join(' ; ') : String(v || '');
+  const title = text(d.title);
+  if (BLOCKED_TITLE_RE.test(title) || BLOCKED_TAG_RE.test(text(d.subject))) return true;
+  return /(^|[^\p{L}])nekro($|[^\p{L}])/iu.test(title) && /^1998/.test(text(d.year));
+}
 const IA_FETCH_TIMEOUT_MS = 6000;
 const IA_MAX_RETRIES = 1;
 const IA_META_TIMEOUT_MS = 2500;
@@ -2193,10 +2211,10 @@ async function searchPool(query, rows = 50, priority = IA_BACKGROUND) {
   const cacheKey = `ia_pool_${query}_r${rows}`;
   const cached = iaCacheGet(cacheKey);
   if (cached) { dbgCacheHit('search', priority, query, cached.length); return cached; }
-  const url = `https://archive.org/advancedsearch.php?q=${encodeURIComponent(query + ' ' + SAFE_CONTENT_FILTER + ' ' + BLOCKED_TITLES_FILTER)}&fl[]=identifier&rows=${rows}&page=1&output=json`;
+  const url = `https://archive.org/advancedsearch.php?q=${encodeURIComponent(query + ' ' + SAFE_CONTENT_FILTER)}&fl[]=identifier&fl[]=title&fl[]=subject&fl[]=year&rows=${rows}&page=1&output=json`;
   const res = await fetchWithRetry(url, { priority, kind: 'search', label: query.slice(0, 48) });
   const data = await res.json();
-  const pool = ((data.response && data.response.docs) || []).map(d => d.identifier).filter(Boolean);
+  const pool = ((data.response && data.response.docs) || []).filter(d => !isBlockedDoc(d)).map(d => d.identifier).filter(Boolean);
   if (pool.length) iaCacheSet(cacheKey, pool);
   return pool;
 }
